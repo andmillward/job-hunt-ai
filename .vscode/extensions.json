@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "fwcd.kotlin",
+    "vscjava.vscode-java-pack",
+    "vmware.vscode-spring-boot",
+    "ms-python.python",
+    "ms-python.debugpy",
+    "ms-azuretools.vscode-docker",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss"
+  ]
+}
