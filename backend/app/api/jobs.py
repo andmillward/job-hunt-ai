@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.job_service import JobService
-from ..schemas.schemas import JobSearchRequest, JobListingResponse, SearchNetRequest, SavedSearchResponse, RunVerifiedRequest
+from ..schemas.schemas import JobSearchRequest, JobListingResponse, SearchNetRequest, SavedSearchResponse, RunVerifiedRequest, RankJobsRequest
 from typing import List, Optional
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -42,6 +42,13 @@ async def run_verified_searches(request: RunVerifiedRequest, db: Session = Depen
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/rank")
+async def rank_jobs(request: RankJobsRequest, db: Session = Depends(get_db)):
+    try:
+        return await JobService.rank_jobs(db, request.resume_id, request.job_ids, request.limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/search")
 async def search_jobs(request: JobSearchRequest, db: Session = Depends(get_db)):
     try:
@@ -59,6 +66,7 @@ def get_jobs(status: Optional[str] = None, db: Session = Depends(get_db)):
 
 @router.patch("/{job_id}/status")
 def update_job_status(job_id: int, status: str, db: Session = Depends(get_db)):
+    from ..models import models
     job = db.query(models.JobListing).filter(models.JobListing.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")

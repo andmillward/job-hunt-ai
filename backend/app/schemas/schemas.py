@@ -16,6 +16,16 @@ class SettingUpdate(BaseModel):
     key: str
     value: str
 
+class JobAlignmentResponse(BaseModel):
+    id: int
+    score_skills: int
+    score_culture: int
+    score_overall: int
+    ai_insight: Optional[str]
+    created_at: Any
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ResumeResponse(BaseModel):
     id: int
     fileName: str
@@ -37,6 +47,9 @@ class JobListingResponse(BaseModel):
     site: Optional[str]
     status: str
     created_at: Any
+    
+    # MIL-44: Alignments for the current resume
+    alignments: List[JobAlignmentResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,3 +73,8 @@ class SearchNetRequest(BaseModel):
 
 class RunVerifiedRequest(BaseModel):
     resume_id: int
+
+class RankJobsRequest(BaseModel):
+    resume_id: int
+    job_ids: Optional[List[int]] = None
+    limit: Optional[int] = 20

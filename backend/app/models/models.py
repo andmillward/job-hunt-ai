@@ -17,8 +17,9 @@ class Resume(Base):
     # MIL-43: Store preference for ranking & recurring search
     dream_role = Column(Text, nullable=True)
     
-    # Relationship to searches
+    # Relationship to searches and alignments
     searches = relationship("SavedSearch", back_populates="resume", cascade="all, delete-orphan")
+    alignments = relationship("JobAlignment", back_populates="resume", cascade="all, delete-orphan")
 
     # Property alias for Pydantic
     @property
@@ -66,6 +67,9 @@ class JobListing(Base):
     last_seen_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="new") # new, applied, rejected, interviewing, closed
 
+    # Relationship to alignments
+    alignments = relationship("JobAlignment", back_populates="job", cascade="all, delete-orphan")
+
 class SavedSearch(Base):
     __tablename__ = "saved_searches"
 
@@ -86,3 +90,21 @@ class SavedSearch(Base):
 
     # Relationship back to resume
     resume = relationship("Resume", back_populates="searches")
+
+class JobAlignment(Base):
+    __tablename__ = "job_alignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("job_listings.id", ondelete="CASCADE"))
+    resume_id = Column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"))
+    
+    score_skills = Column(Integer, default=0)
+    score_culture = Column(Integer, default=0)
+    score_overall = Column(Integer, default=0)
+    ai_insight = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    job = relationship("JobListing", back_populates="alignments")
+    resume = relationship("Resume", back_populates="alignments")

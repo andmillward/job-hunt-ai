@@ -102,10 +102,12 @@ class JobService:
         return {"found": total_found, "new": total_new}
 
     @staticmethod
-    def get_jobs(db: Session, status: Optional[str] = None):
+    def get_jobs(db: Session, status: Optional[str] = None, resume_id: Optional[int] = None):
         query = db.query(models.JobListing)
         if status:
             query = query.filter(models.JobListing.status == status)
+        
+        # When fetching jobs, we want the results ordered by creation but later we will sort by ranking score in frontend
         return query.order_by(models.JobListing.created_at.desc()).all()
 
     @staticmethod
@@ -156,8 +158,6 @@ class JobService:
         {resume_context}
         
         User Preference: {dream_role}
-        
-        The goal is to find jobs that MATCH the candidate's skills while satisfying their requirements (salary, remote, etc.).
         
         Return ONLY a JSON array of objects. Each object MUST have:
         - keywords: string (e.g. "Senior Kotlin Developer Fintech")
@@ -287,3 +287,104 @@ class JobService:
             "was_recent": recent_run is not None,
             "last_run": recent_run.last_run_at.isoformat() if recent_run else None
         }
+
+    # --- MIL-44: Ranking Engine ---
+
+    @classmethod
+    async def rank_jobs(cls, db: Session, resume_id: int, job_ids: Optional[List[int]] = None, limit: int = 20):
+        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+        if not resume:
+            raise Exception("Resume profile not found")
+
+        # Get jobs to rank
+        query = db.query(models.JobListing)
+        if job_ids:
+            query = query.filter(models.JobListing.id.in_(job_ids))
+        else:
+            # Rank jobs that don't have an alignment for this resume yet
+            already_ranked = db.query(models.JobAlignment.job_id).filter(models.JobAlignment.resume_id == resume_id).all()
+            already_ranked_ids = [r[0] for r in already_ranked]
+            query = query.filter(~models.JobListing.id.in_(already_ranked_ids))
+
+        jobs_to_rank = query.limit(limit).all() 
+        if not jobs_to_rank:
+            return {"status": "complete", "ranked_count": 0}
+
+        logger.info(f">>> SERVICE: Ranking batch of {len(jobs_to_rank)} jobs for resume {resume_id}")
+
+        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
+        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = gemini_key 
+        
+        if not api_key:
+            raise Exception("AI API Key missing.")
+
+        provider = ResumeService.get_provider(db)
+
+        # Build context and combined job list for batch prompt
+        context = f"""
+        User Dream Role Preferences: {resume.dream_role}
+        User Technical Skills: {resume.parsed_skills}
+        """
+        
+        jobs_data = []
+        for j in jobs_to_rank:
+            jobs_data.append({
+                "id": j.id,
+                "title": j.title,
+                "company": j.company,
+                "description": j.description[:1500] if j.description else ""
+            })
+
+        prompt = f"""
+        Score the following batch of job listings against the user profile.
+        
+        {context}
+        
+        Job Listings to Score:
+        {json.dumps(jobs_data, indent=2)}
+        
+        Return ONLY a JSON array of objects. Each object MUST include:
+        - id: the integer ID of the job from the input list
+        - score_skills: integer (1-10)
+        - score_culture: integer (1-10, based on benefits/paternity/PTO/remote preferences)
+        - score_overall: integer (1-10)
+        - ai_insight: string (max 150 chars, specific reason for alignment)
+        
+        Example Output:
+        [
+          {{"id": 123, "score_skills": 9, "score_culture": 8, "score_overall": 9, "ai_insight": "Perfect match for Kotlin and remote needs."}}
+        ]
+        """
+        
+        try:
+            resp = provider.complete(prompt, model, api_key)
+            if "```json" in resp:
+                resp = resp.split("```json")[1].split("```")[0].strip()
+            elif "```" in resp:
+                resp = resp.split("```")[1].split("```")[0].strip()
+            
+            results_list = json.loads(resp)
+            saved_count = 0
+            
+            for res in results_list:
+                job_id = res.get("id")
+                if not job_id: continue
+                
+                alignment = models.JobAlignment(
+                    job_id=job_id,
+                    resume_id=resume_id,
+                    score_skills=res.get("score_skills", 0),
+                    score_culture=res.get("score_culture", 0),
+                    score_overall=res.get("score_overall", 0),
+                    ai_insight=res.get("ai_insight", "")
+                )
+                db.add(alignment)
+                saved_count += 1
+            
+            db.commit()
+            return {"status": "success", "ranked_count": saved_count}
+            
+        except Exception as e:
+            logger.error(f">>> SERVICE: Batch Ranking Failure: {str(e)}")
+            raise e
