@@ -121,11 +121,15 @@ class JobService:
 
     @classmethod
     async def generate_search_net(cls, db: Session, dream_role: str, resume_id: Optional[int] = None) -> List[models.SavedSearch]:
-        logger.info(f">>> SERVICE: Generating search net for '{dream_role}'")
+        logger.info(f">>> SERVICE: Generating resume-aware search net")
         
         # Persist the dream role on the resume for future ranking
+        resume = None
         if resume_id:
-            ResumeService.update_dream_role(db, resume_id, dream_role)
+            resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+            if resume:
+                resume.dream_role = dream_role
+                db.commit()
 
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -137,24 +141,31 @@ class JobService:
 
         provider = ResumeService.get_provider(db)
         
+        # Build a resume-aware prompt
+        resume_context = ""
+        if resume:
+            resume_context = f"""
+            Candidate Profile:
+            - Key Skills: {resume.parsed_skills}
+            - Experience Summary: {resume.parsed_experience[:500]}...
+            """
+
         prompt = f"""
-        Given the following dream role description, generate 5-10 specific search query configurations.
-        Analyze the description for salary, location, job type (Remote/Onsite), and industry focus.
+        Given the following dream role description and the candidate's actual resume data, generate 5-10 specific search query configurations.
         
-        Dream Role: {dream_role}
+        {resume_context}
         
-        Return ONLY a JSON array of objects. Each object MUST have these exact fields:
+        User Preference: {dream_role}
+        
+        The goal is to find jobs that MATCH the candidate's skills while satisfying their requirements (salary, remote, etc.).
+        
+        Return ONLY a JSON array of objects. Each object MUST have:
         - keywords: string (e.g. "Senior Kotlin Developer Fintech")
         - location: string or null (e.g. "USA", "London", "Remote")
-        - min_salary: integer or null (e.g. 130000)
-        - remote_only: boolean (true if description explicitly requires remote)
+        - min_salary: integer or null
+        - remote_only: boolean
         - job_type: string or null (one of: full_time, contract, part_time, internship)
         - hours_old: integer (default 72)
-        
-        Example Output:
-        [
-          {{"keywords": "Staff Engineer Java Typescript", "location": "Remote", "min_salary": 140000, "remote_only": true, "job_type": "full_time", "hours_old": 72}}
-        ]
         """
         
         try:
@@ -171,7 +182,6 @@ class JobService:
                 kw = cfg.get("keywords")
                 if not kw: continue
                 
-                # Check for existing search for this resume
                 existing = db.query(models.SavedSearch).filter(
                     models.SavedSearch.keywords == kw, 
                     models.SavedSearch.resume_id == resume_id
