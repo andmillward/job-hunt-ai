@@ -90,3 +90,12 @@ class ResumeService:
     @staticmethod
     def get_all_resumes(db: Session):
         return db.query(models.Resume).order_by(models.Resume.created_at.desc()).all()
+
+    @staticmethod
+    def delete_resume(db: Session, resume_id: int):
+        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+        if resume:
+            db.delete(resume)
+            db.commit()
+            return True
+        return False

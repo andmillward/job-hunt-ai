@@ -2,10 +2,33 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.job_service import JobService
-from ..schemas.schemas import JobSearchRequest, JobListingResponse
+from ..schemas.schemas import JobSearchRequest, JobListingResponse, SearchNetRequest, SavedSearchResponse, RunVerifiedRequest
 from typing import List, Optional
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+@router.post("/search-net", response_model=List[SavedSearchResponse])
+async def generate_search_net(request: SearchNetRequest, db: Session = Depends(get_db)):
+    try:
+        searches = await JobService.generate_search_net(db, request.dream_role, request.resume_id)
+        return searches
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/saved-searches", response_model=List[SavedSearchResponse])
+def get_saved_searches(resume_id: Optional[int] = None, db: Session = Depends(get_db)):
+    return JobService.get_saved_searches(db, resume_id)
+
+@router.patch("/saved-searches/{search_id}")
+def update_saved_search(search_id: int, is_verified: bool, db: Session = Depends(get_db)):
+    return JobService.update_saved_search(db, search_id, is_verified)
+
+@router.post("/run-verified")
+async def run_verified_searches(request: RunVerifiedRequest, db: Session = Depends(get_db)):
+    try:
+        return await JobService.run_verified_searches(db, request.resume_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/search")
 async def search_jobs(request: JobSearchRequest, db: Session = Depends(get_db)):
@@ -37,7 +60,9 @@ def get_jobs(status: Optional[str] = None, db: Session = Depends(get_db)):
 
 @router.patch("/{job_id}/status")
 def update_job_status(job_id: int, status: str, db: Session = Depends(get_db)):
-    job = JobService.update_job_status(db, job_id, status)
+    job = db.query(models.JobListing).filter(models.JobListing.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    job.status = status
+    db.commit()
     return {"status": "success"}

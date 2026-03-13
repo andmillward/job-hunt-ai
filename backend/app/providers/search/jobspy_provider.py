@@ -7,21 +7,35 @@ from .base import BaseSearchProvider
 logger = logging.getLogger("uvicorn")
 
 class JobSpyProvider(BaseSearchProvider):
-    def search_jobs(self, keywords: str, location: Optional[str] = None, results_wanted: int = 20, **kwargs) -> List[Dict[str, Any]]:
+    def search_jobs(self, keywords: str, location: Optional[str] = None, results_wanted: int = 50, **kwargs) -> List[Dict[str, Any]]:
         logger.info(f">>> PROVIDER: JobSpy searching for '{keywords}'")
         site_name = kwargs.get("site_name", ["linkedin", "indeed", "glassdoor", "zip_recruiter"])
         
+        # Extract Levers
+        min_salary = kwargs.get("min_salary")
+        remote_only = kwargs.get("remote_only", False)
+        job_type = kwargs.get("job_type")
+        hours_old = kwargs.get("hours_old", 72)
+        
         try:
+            # Note: JobSpy is sync, so we just call it. 
+            # It's wrapped in asyncio.to_thread if called from search_and_store_jobs logic
             jobs_df = scrape_jobs(
                 site_name=site_name,
                 search_term=keywords,
                 location=location,
                 results_wanted=results_wanted,
-                hours_old=kwargs.get("hours_old", 72),
+                hours_old=hours_old,
                 country_誠=kwargs.get("country", "usa"),
+                is_remote=remote_only,
+                job_type=job_type,
+                min_salary=min_salary
             )
             
             standardized_jobs = []
+            if jobs_df is None or jobs_df.empty:
+                return []
+                
             for _, job in jobs_df.iterrows():
                 # Sanitize values
                 job_url = str(job['job_url']) if pd.notnull(job['job_url']) else None
@@ -50,4 +64,4 @@ class JobSpyProvider(BaseSearchProvider):
             return standardized_jobs
         except Exception as e:
             logger.error(f">>> PROVIDER: JobSpy Error: {str(e)}")
-            raise e
+            return []

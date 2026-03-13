@@ -33,3 +33,10 @@ def get_resumes(db: Session = Depends(get_db)):
         }
         for r in resumes
     ]
+
+@router.delete("/{resume_id}")
+def delete_resume(resume_id: int, db: Session = Depends(get_db)):
+    success = ResumeService.delete_resume(db, resume_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"status": "success"}

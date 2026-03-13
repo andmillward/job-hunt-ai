@@ -7,7 +7,7 @@ from .base import BaseSearchProvider
 logger = logging.getLogger("uvicorn")
 
 class JSearchProvider(BaseSearchProvider):
-    def search_jobs(self, keywords: str, location: Optional[str] = None, results_wanted: int = 20, **kwargs) -> List[Dict[str, Any]]:
+    def search_jobs(self, keywords: str, location: Optional[str] = None, results_wanted: int = 50, **kwargs) -> List[Dict[str, Any]]:
         api_key = kwargs.get("api_key")
         if not api_key:
             logger.error(">>> PROVIDER: JSearch Error - API Key missing")
@@ -24,11 +24,26 @@ class JSearchProvider(BaseSearchProvider):
             "x-rapidapi-key": api_key,
             "x-rapidapi-host": "jsearch.p.rapidapi.com"
         }
+        
+        # Levers
+        remote_only = kwargs.get("remote_only", False)
+        job_type = kwargs.get("job_type")
+        
         params = {
             "query": query,
             "num_pages": "1",
-            "date_posted": "3days"
+            "date_posted": "3days",
+            "remote_jobs_only": "true" if remote_only else "false"
         }
+        
+        if job_type:
+            jt_map = {
+                "full_time": "FULLTIME",
+                "contract": "CONTRACT",
+                "part_time": "PARTTIME",
+                "internship": "INTERN"
+            }
+            params["employment_types"] = jt_map.get(job_type, "FULLTIME")
 
         try:
             with httpx.Client() as client:
@@ -40,12 +55,10 @@ class JSearchProvider(BaseSearchProvider):
                 standardized_jobs = []
                 
                 for job in results:
-                    # Sanitize posted_at
                     posted_at = None
                     posted_at_str = job.get("job_posted_at_datetime_utc")
                     if posted_at_str:
                         try:
-                            # Usually ISO format
                             posted_at = datetime.fromisoformat(posted_at_str.replace("Z", "+00:00"))
                         except:
                             posted_at = None

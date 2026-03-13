@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { FileUp, Briefcase, FileText, Settings, Loader2, CheckCircle, AlertCircle, Code, Eye, ExternalLink, X, Moon, Sun } from 'lucide-react'
+import { FileUp, Briefcase, FileText, Settings, Loader2, CheckCircle, AlertCircle, Code, Eye, ExternalLink, X, Moon, Sun, Trash2, Globe, Send, DollarSign, Clock } from 'lucide-react'
 import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:8080/api'
@@ -30,6 +30,18 @@ interface Job {
   created_at: string
 }
 
+interface SavedSearch {
+  id: number
+  keywords: string
+  location: string | null
+  min_salary: number | null
+  remote_only: boolean
+  job_type: string | null
+  hours_old: number
+  is_verified: boolean
+  last_run_at: string | null
+}
+
 interface Toast {
   message: string
   type: 'success' | 'error' | 'info'
@@ -40,7 +52,10 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [resumes, setResumes] = useState<Resume[]>([])
-  const [selectedResume, setSelectedResume] = useState<Resume | null>(null)
+  const [selectedResume, setSelectedResume] = useState<Resume | null>(() => {
+    const saved = localStorage.getItem('selectedResume')
+    return saved ? JSON.parse(saved) : null
+  })
   const [showDebug, setShowDebug] = useState(false)
   
   // Settings state
@@ -51,8 +66,12 @@ function App() {
   // Jobs state
   const [jobs, setJobs] = useState<Job[]>([])
   const [searchingJobs, setSearchingJobs] = useState(false)
-  const [searchKeywords, setSearchKeywords] = useState('')
-  const [searchLocation, setSearchLocation] = useState('')
+  
+  // Search Net state
+  const [dreamRole, setDreamRole] = useState('')
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([])
+  const [generatingNet, setGeneratingNet] = useState(false)
+  const [runningNet, setRunningNet] = useState(false)
   
   // UI State
   const [toast, setToast] = useState<Toast | null>(null)
@@ -68,6 +87,14 @@ function App() {
   }, [activeTab])
 
   useEffect(() => {
+    if (selectedResume) {
+      localStorage.setItem('selectedResume', JSON.stringify(selectedResume))
+    } else {
+      localStorage.removeItem('selectedResume')
+    }
+  }, [selectedResume])
+
+  useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark')
     } else {
@@ -79,6 +106,11 @@ function App() {
     try {
       const response = await axios.get(`${API_BASE_URL}/resumes`)
       setResumes(response.data)
+      
+      if (selectedResume && !response.data.find((r: Resume) => r.id === selectedResume.id)) {
+        setSelectedResume(null)
+      }
+      
       if (response.data.length > 0 && !selectedResume) {
         setSelectedResume(response.data[0])
       }
@@ -105,6 +137,19 @@ function App() {
     }
   }, [])
 
+  const fetchSavedSearches = useCallback(async () => {
+    if (!selectedResume) {
+      setSavedSearches([])
+      return
+    }
+    try {
+      const response = await axios.get(`${API_BASE_URL}/jobs/saved-searches?resume_id=${selectedResume.id}`)
+      setSavedSearches(response.data)
+    } catch (err) {
+      console.error('Error fetching saved searches', err)
+    }
+  }, [selectedResume])
+
   const handleAutoDetect = useCallback(async (keyToUse?: string) => {
     const key = keyToUse || settings.GEMINI_API_KEY
     if (!key) return
@@ -125,6 +170,10 @@ function App() {
     fetchJobs()
   }, [fetchResumes, fetchSettings, fetchJobs])
 
+  useEffect(() => {
+    fetchSavedSearches()
+  }, [fetchSavedSearches])
+
   // Auto-detect models when settings load if we have a key
   useEffect(() => {
     if (settings.GEMINI_API_KEY && fetchedModels.length === 0) {
@@ -139,7 +188,6 @@ function App() {
       setSettings(prev => ({ ...prev, [key]: value }))
       showToast(`${key.replace(/_/g, ' ')} saved successfully`)
       
-      // Trigger auto-detect if saving Gemini key
       if (key === 'GEMINI_API_KEY') {
         handleAutoDetect(value)
       }
@@ -178,25 +226,100 @@ function App() {
     }
   }
 
-  const handleJobSearch = async () => {
-    if (!searchKeywords) {
-      showToast("Please enter keywords to search.", "info")
-      return
+  const handleDeleteResume = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
+    if (!confirm("Are you sure you want to delete this profile? All associated search nets will be removed.")) return
+    
+    try {
+      await axios.delete(`${API_BASE_URL}/resumes/${id}`)
+      await fetchResumes()
+      showToast("Resume deleted successfully")
+    } catch (err) {
+      console.error(err)
+      showToast("Failed to delete resume", "error")
     }
+  }
+
+  const handleSingleSearch = async (search: SavedSearch) => {
     setSearchingJobs(true)
     try {
       const response = await axios.post(`${API_BASE_URL}/jobs/search`, {
-        keywords: searchKeywords,
-        location: searchLocation,
-        results_wanted: 20
+        keywords: search.keywords,
+        location: search.location,
+        min_salary: search.min_salary,
+        remote_only: search.remote_only,
+        job_type: search.job_type,
+        hours_old: search.hours_old
       })
       await fetchJobs()
       showToast(`Search complete: found ${response.data.found} jobs (${response.data.new} new)`)
     } catch (err) {
       console.error('Error searching jobs', err)
-      showToast("Job search failed. Check console for details.", "error")
+      showToast("Job search failed.", "error")
     } finally {
       setSearchingJobs(false)
+    }
+  }
+
+  const handleGenerateNet = async () => {
+    if (!dreamRole) {
+      showToast("Describe your dream role first!", "info")
+      return
+    }
+    if (!selectedResume) {
+      showToast("Select a resume profile first!", "error")
+      return
+    }
+    setGeneratingNet(true)
+    try {
+      await axios.post(`${API_BASE_URL}/jobs/search-net`, {
+        dream_role: dreamRole,
+        resume_id: selectedResume.id
+      })
+      await fetchSavedSearches()
+      showToast("AI has generated a search net for this profile.")
+    } catch (err) {
+      console.error(err)
+      showToast("Failed to generate search net", "error")
+    } finally {
+      setGeneratingNet(false)
+    }
+  }
+
+  const handleRunVerifiedNet = async () => {
+    if (!selectedResume) return
+    
+    const lastRun = savedSearches.find(s => s.last_run_at)?.last_run_at
+    if (lastRun) {
+      const lastDate = new Date(lastRun)
+      const diff = Date.now() - lastDate.getTime()
+      if (diff < 24 * 60 * 60 * 1000) {
+        if (!confirm("You ran this search net less than 24 hours ago. Proceed anyway?")) return
+      }
+    }
+
+    setRunningNet(true)
+    try {
+      const response = await axios.post(`${API_BASE_URL}/jobs/run-verified`, { 
+        resume_id: selectedResume.id 
+      })
+      await fetchJobs()
+      await fetchSavedSearches()
+      showToast(`Search net deployed: found ${response.data.found} jobs (${response.data.new} new)`)
+    } catch (err) {
+      console.error(err)
+      showToast("Search net execution failed", "error")
+    } finally {
+      setRunningNet(false)
+    }
+  }
+
+  const toggleVerifySearch = async (id: number, currentStatus: boolean) => {
+    try {
+      await axios.patch(`${API_BASE_URL}/jobs/saved-searches/${id}?is_verified=${!currentStatus}`)
+      setSavedSearches(savedSearches.map(s => s.id === id ? { ...s, is_verified: !currentStatus } : s))
+    } catch (err) {
+      console.error(err)
     }
   }
 
@@ -257,6 +380,20 @@ function App() {
           </button>
         </nav>
         
+        {/* Profile Selector in Sidebar */}
+        <div className="mt-auto py-6 border-t border-slate-200 dark:border-slate-800">
+           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Active Profile</p>
+           <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/50 rounded-lg flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                 <FileText className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                 <p className="text-xs font-bold truncate dark:text-white">{selectedResume?.fileName || 'No Profile'}</p>
+                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Profile Active</p>
+              </div>
+           </div>
+        </div>
+
         <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
            <button 
              onClick={() => setShowDebug(!showDebug)}
@@ -283,7 +420,7 @@ function App() {
               <header className="flex justify-between items-end">
                 <div>
                   <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight">Resume Hub</h2>
-                  <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Upload and inspect your parsed profile data.</p>
+                  <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Upload and manage your career profiles.</p>
                 </div>
               </header>
 
@@ -316,7 +453,7 @@ function App() {
 
                   <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
                     <div className="p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-                      <h3 className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">History</h3>
+                      <h3 className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Profiles</h3>
                     </div>
                     <div className="max-h-[400px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                       {resumes.length === 0 ? (
@@ -328,11 +465,19 @@ function App() {
                             onClick={() => setSelectedResume(resume)}
                             className={`p-5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition cursor-pointer group ${selectedResume?.id === resume.id ? 'bg-indigo-500/5 border-l-4 border-indigo-600' : ''}`}
                           >
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <h4 className={`font-bold text-sm truncate ${selectedResume?.id === resume.id ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-700 dark:text-slate-300'}`}>{resume.fileName}</h4>
                               <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">{new Date(resume.createdAt).toLocaleString()}</p>
                             </div>
-                            <Eye className={`w-4 h-4 transition ${selectedResume?.id === resume.id ? 'text-indigo-500' : 'text-slate-300 dark:text-slate-700 group-hover:text-slate-400'}`} />
+                            <div className="flex items-center gap-2">
+                               <Eye className={`w-4 h-4 transition ${selectedResume?.id === resume.id ? 'text-indigo-500' : 'text-slate-300 dark:text-slate-700 group-hover:text-slate-400'}`} />
+                               <button 
+                                 onClick={(e) => handleDeleteResume(e, resume.id)}
+                                 className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition opacity-0 group-hover:opacity-100"
+                               >
+                                  <Trash2 className="w-4 h-4" />
+                               </button>
+                            </div>
                           </div>
                         ))
                       )}
@@ -364,7 +509,7 @@ function App() {
                              </div>
                              <div>
                                <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{selectedResume.fileName}</h3>
-                               <p className="text-sm text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest mt-1">Parsed by JobHunt AI Engine</p>
+                               <p className="text-sm text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest mt-1">Profile selected for search nets</p>
                              </div>
                           </div>
 
@@ -412,7 +557,7 @@ function App() {
                         <FileText className="w-12 h-12 text-slate-300 dark:text-slate-600" />
                       </div>
                       <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-3 tracking-tight">No Active Profile</h3>
-                      <p className="text-slate-500 dark:text-slate-400 max-w-sm font-medium leading-relaxed">Upload your resume to see the AI decomposition, skill mapping, and JSON debug output.</p>
+                      <p className="text-slate-500 dark:text-slate-400 max-w-sm font-medium leading-relaxed">Upload or select a resume to begin building your search net.</p>
                     </div>
                   )}
                 </div>
@@ -421,110 +566,202 @@ function App() {
           )}
 
           {activeTab === 'jobs' && (
-            <div className="space-y-8 animate-in fade-in duration-500">
-               <header className="flex justify-between items-center">
+            <div className="space-y-10 animate-in fade-in duration-500">
+               <header className="flex justify-between items-start">
                 <div>
                   <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight">Job Discovery</h2>
-                  <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium">Find and track opportunities from multiple sources.</p>
+                  <p className="text-slate-500 dark:text-slate-400 mt-2 font-medium max-w-xl">
+                    Deploy AI agents for <span className="text-indigo-600 dark:text-indigo-400 font-black">{selectedResume?.fileName || 'None'}</span>.
+                  </p>
                 </div>
-                <div className="flex gap-3">
-                   <div className="relative group">
-                     <input 
-                       type="text" 
-                       placeholder="Keywords (e.g. Kotlin Developer)" 
-                       value={searchKeywords}
-                       onChange={(e) => setSearchKeywords(e.target.value)}
-                       className="p-3 pl-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm w-72 focus:ring-4 focus:ring-indigo-500/10 dark:focus:ring-indigo-500/20 outline-none transition-all shadow-sm font-bold placeholder:text-slate-400"
-                     />
-                   </div>
-                   <input 
-                     type="text" 
-                     placeholder="Location" 
-                     value={searchLocation}
-                     onChange={(e) => setSearchLocation(e.target.value)}
-                     className="p-3 pl-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm w-48 focus:ring-4 focus:ring-indigo-500/10 dark:focus:ring-indigo-500/20 outline-none transition-all shadow-sm font-bold placeholder:text-slate-400"
-                   />
-                   <button 
-                     onClick={handleJobSearch}
-                     disabled={searchingJobs}
-                     className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-500 transition-all flex items-center gap-3 shadow-xl shadow-indigo-500/30 active:scale-95"
-                   >
-                     {searchingJobs ? <Loader2 className="w-5 h-5 animate-spin" /> : <Briefcase className="w-5 h-5" />}
-                     {searchingJobs ? 'Searching' : 'Find Jobs'}
-                   </button>
-                </div>
+                <button 
+                  onClick={handleRunVerifiedNet}
+                  disabled={runningNet || !selectedResume || savedSearches.filter(s => s.is_verified).length === 0}
+                  className="bg-green-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-green-700 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400 transition-all flex items-center gap-3 shadow-xl shadow-green-500/20 active:scale-95"
+                  title="Executes all verified queries below (Daily usage recommended)"
+                >
+                  {runningNet ? <Loader2 className="w-4 h-4 animate-spin" /> : <Briefcase className="w-4 h-4" />}
+                  {runningNet ? 'Deploying Net' : 'Update Verified Net'}
+                </button>
               </header>
 
-              <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
-                    <tr>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Job Title / Company</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Location</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Source</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Status</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {jobs.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-8 py-32 text-center text-slate-400 dark:text-slate-600 font-medium italic">
-                          {searchingJobs ? (
-                            <div className="flex flex-col items-center gap-4">
-                               <Loader2 className="w-10 h-10 animate-spin text-indigo-500 opacity-20" />
-                               <span>Deploying search agents...</span>
+              {/* AI Search Generator */}
+              <div className="bg-indigo-600 dark:bg-indigo-900/20 rounded-[2.5rem] p-10 shadow-2xl shadow-indigo-500/20 relative overflow-hidden">
+                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
+                 <div className="relative z-10 space-y-6">
+                    <div>
+                       <h3 className="text-2xl font-black text-white tracking-tight">Search Net Generator</h3>
+                       <p className="text-indigo-100 dark:text-indigo-300 font-medium">Describe your dream role. We'll generate optimized queries using all search levers.</p>
+                    </div>
+                    
+                    <div className="flex flex-col md:flex-row gap-4">
+                       <div className="flex-1 relative">
+                          <input 
+                            type="text" 
+                            placeholder="e.g. Senior Kotlin Dev at a high-growth fintech, remote preferred, paternity leave priority, 130k+ salary..." 
+                            value={dreamRole}
+                            onChange={(e) => setDreamRole(e.target.value)}
+                            className="w-full p-5 bg-white/10 border border-white/20 rounded-2xl text-white placeholder:text-indigo-200/50 focus:ring-4 focus:ring-white/10 outline-none transition-all font-bold"
+                          />
+                       </div>
+                       <button 
+                         onClick={handleGenerateNet}
+                         disabled={generatingNet || !dreamRole || !selectedResume}
+                         className="bg-white text-indigo-600 px-8 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-50 disabled:bg-white/20 disabled:text-white/40 transition-all flex items-center justify-center gap-3 shadow-lg active:scale-95"
+                       >
+                         {generatingNet ? <Loader2 className="w-5 h-5 animate-spin" /> : <Code className="w-5 h-5" />}
+                         {generatingNet ? 'Processing' : 'Generate'}
+                       </button>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                {/* Saved Searches / Search Net */}
+                <div className="lg:col-span-4 space-y-6">
+                   <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                      <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-between items-center">
+                        <div>
+                           <h3 className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Active Search Net</h3>
+                           <p className="text-[9px] font-bold text-slate-400 mt-1 italic uppercase tracking-tighter truncate max-w-[150px]">{selectedResume?.fileName || 'No Profile'}</p>
+                        </div>
+                        <span className="bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{savedSearches.length}</span>
+                      </div>
+                      <div className="max-h-[600px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                        {!selectedResume ? (
+                          <div className="p-12 text-center text-slate-400 text-sm font-medium italic">Please select a profile in Resume Hub first.</div>
+                        ) : savedSearches.length === 0 ? (
+                          <div className="p-12 text-center text-slate-400 text-sm font-medium italic animate-pulse">Your search net is empty. Generate queries above!</div>
+                        ) : (
+                          savedSearches.map(search => (
+                            <div key={search.id} className="p-5 space-y-3 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition group">
+                               <div className="flex justify-between items-start">
+                                  <div className="min-w-0">
+                                     <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200 leading-tight pr-4">{search.keywords}</h4>
+                                     <div className="flex flex-wrap gap-2 mt-2">
+                                        {search.location && (
+                                           <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                                              <Globe className="w-2.5 h-2.5" /> {search.location}
+                                           </span>
+                                        )}
+                                        {search.min_salary && (
+                                           <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-green-500/5 text-green-600 rounded border border-green-500/10 flex items-center gap-1">
+                                              <DollarSign className="w-2.5 h-2.5" /> {Math.round(search.min_salary/1000)}k+
+                                           </span>
+                                        )}
+                                        {search.remote_only && (
+                                           <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-indigo-500/5 text-indigo-600 rounded border border-indigo-500/10 flex items-center gap-1">
+                                              Remote
+                                           </span>
+                                        )}
+                                     </div>
+                                  </div>
+                                  <div className="flex gap-1.5 shrink-0">
+                                     <button 
+                                       onClick={() => handleSingleSearch(search)}
+                                       className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-indigo-500/10 hover:text-indigo-500 transition-all opacity-0 group-hover:opacity-100"
+                                       title="Run this search now"
+                                     >
+                                        <Send className="w-3.5 h-3.5" />
+                                     </button>
+                                     <button 
+                                       onClick={() => toggleVerifySearch(search.id, search.is_verified)}
+                                       className={`p-1.5 rounded-lg transition-all ${search.is_verified ? 'bg-green-500/10 text-green-500' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-indigo-500/10 hover:text-indigo-500'}`}
+                                       title={search.is_verified ? "Verified (Locked In)" : "Lock In for verified net"}
+                                     >
+                                       <CheckCircle className="w-3.5 h-3.5" />
+                                     </button>
+                                  </div>
+                               </div>
+                               <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest pt-1 border-t border-slate-50 dark:border-slate-800/50">
+                                  <span className="text-slate-400 dark:text-slate-600 flex items-center gap-1.5">
+                                     <Clock className="w-3 h-3 opacity-50" />
+                                     {search.hours_old}h limit
+                                  </span>
+                                  {search.last_run_at && (
+                                    <span className="text-slate-400 dark:text-slate-600">Ran {new Date(search.last_run_at).toLocaleDateString()}</span>
+                                  )}
+                               </div>
                             </div>
-                          ) : 'No opportunities found. Try launching a new search.'}
-                        </td>
-                      </tr>
-                    ) : (
-                      jobs.map(job => (
-                        <tr key={job.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition group">
-                          <td className="px-8 py-6">
-                            <h4 className="font-black text-slate-900 dark:text-white tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{job.title}</h4>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-1 uppercase tracking-widest">{job.company}</p>
-                          </td>
-                          <td className="px-8 py-6 text-xs font-bold text-slate-600 dark:text-slate-400 tracking-tight">{job.location || 'Remote'}</td>
-                          <td className="px-8 py-6 text-[10px] font-black text-slate-500 dark:text-slate-500 uppercase tracking-[0.1em]">
-                             <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700">{job.site || 'Direct'}</span>
-                          </td>
-                          <td className="px-8 py-6">
-                            <span className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] rounded-xl border ${
-                              job.status === 'applied' ? 'bg-green-500/10 border-green-500/20 text-green-500' : 
-                              job.status === 'rejected' ? 'bg-red-500/10 border-red-500/20 text-red-500' : 
-                              'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'
-                            }`}>
-                              {job.status}
-                            </span>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className="flex gap-2">
-                              {job.job_url && (
-                                <a 
-                                  href={job.job_url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="p-3 text-slate-400 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-2xl transition shadow-sm border border-transparent hover:border-indigo-500/20"
-                                  title="View Original Listing"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                </a>
-                              )}
-                              <button 
-                                onClick={() => updateJobStatus(job.id, job.status === 'applied' ? 'new' : 'applied')}
-                                className={`p-3 rounded-2xl transition border border-transparent ${job.status === 'applied' ? 'text-green-500 bg-green-500/5 hover:bg-green-500/10 border-green-500/20' : 'text-slate-400 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-200 dark:hover:border-slate-700'}`}
-                                title={job.status === 'applied' ? 'Mark as Unapplied' : 'Mark as Applied'}
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                          ))
+                        )}
+                      </div>
+                   </div>
+                </div>
+
+                {/* Job Listings */}
+                <div className="lg:col-span-8">
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                        <tr>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Listing</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Intel</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Status</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Link</th>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {jobs.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-8 py-32 text-center text-slate-400 dark:text-slate-600 font-medium italic">
+                              {searchingJobs || runningNet ? (
+                                <div className="flex flex-col items-center gap-4">
+                                   <Loader2 className="w-10 h-10 animate-spin text-indigo-500 opacity-20" />
+                                   <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Deploying search agents...</span>
+                                </div>
+                              ) : 'No opportunities found. Run a search agent to populate.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          jobs.map(job => (
+                            <tr key={job.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition group">
+                              <td className="px-8 py-6">
+                                <h4 className="font-black text-slate-900 dark:text-white tracking-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{job.title}</h4>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-1 uppercase tracking-widest">{job.company}</p>
+                              </td>
+                              <td className="px-8 py-6">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-tight">{job.location || 'Remote'}</span>
+                                  <span className="text-[9px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest">{job.site || 'Direct'}</span>
+                                </div>
+                              </td>
+                              <td className="px-8 py-6">
+                                <span className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] rounded-xl border ${
+                                  job.status === 'applied' ? 'bg-green-500/10 border-green-500/20 text-green-500' : 
+                                  job.status === 'rejected' ? 'bg-red-500/10 border-red-500/20 text-red-500' : 
+                                  'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'
+                                }`}>
+                                  {job.status}
+                                </span>
+                              </td>
+                              <td className="px-8 py-6 text-right">
+                                <div className="flex gap-2 justify-end">
+                                  {job.job_url && (
+                                    <a 
+                                      href={job.job_url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="p-3 text-slate-400 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-2xl transition shadow-sm border border-transparent hover:border-indigo-500/20"
+                                    >
+                                      <ExternalLink className="w-4 h-4" />
+                                    </a>
+                                  )}
+                                  <button 
+                                    onClick={() => updateJobStatus(job.id, job.status === 'applied' ? 'new' : 'applied')}
+                                    className={`p-3 rounded-2xl transition border border-transparent ${job.status === 'applied' ? 'text-green-500 bg-green-500/5 border-green-500/20 shadow-lg shadow-green-500/10' : 'text-slate-400 dark:text-slate-600 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
           )}

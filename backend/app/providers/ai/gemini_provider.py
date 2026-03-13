@@ -1,20 +1,23 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import json
 import logging
+import os
 from typing import List
 from .base import BaseAIProvider
 
 logger = logging.getLogger("uvicorn")
 
 class GeminiNativeProvider(BaseAIProvider):
+    def _get_client(self, api_key: str):
+        # Using the new google-genai SDK
+        return genai.Client(api_key=api_key)
+
     def parse_resume(self, text: str, model: str, api_key: str) -> dict:
         logger.info(f">>> PROVIDER: GeminiNative parsing with {model}")
         try:
-            genai.configure(api_key=api_key)
+            client = self._get_client(api_key)
             native_name = model.split("/")[-1] if "/" in model else model
-            native_name = native_name.replace("-latest", "")
-            
-            gemini_model = genai.GenerativeModel(native_name)
             
             prompt = f"""
             Extract the following information from the resume text below into a structured JSON format.
@@ -29,7 +32,10 @@ class GeminiNativeProvider(BaseAIProvider):
             Return ONLY the raw JSON object.
             """
             
-            response = gemini_model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=native_name,
+                contents=prompt
+            )
             content = response.text
             
             if "```json" in content:
@@ -45,11 +51,12 @@ class GeminiNativeProvider(BaseAIProvider):
     def complete(self, prompt: str, model: str, api_key: str) -> str:
         logger.info(f">>> PROVIDER: GeminiNative completing with {model}")
         try:
-            genai.configure(api_key=api_key)
+            client = self._get_client(api_key)
             native_name = model.split("/")[-1] if "/" in model else model
-            native_name = native_name.replace("-latest", "")
-            gemini_model = genai.GenerativeModel(native_name)
-            response = gemini_model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=native_name,
+                contents=prompt
+            )
             return response.text
         except Exception as e:
             logger.error(f">>> PROVIDER: GeminiNative Complete Error: {str(e)}")
@@ -57,11 +64,12 @@ class GeminiNativeProvider(BaseAIProvider):
 
     def list_models(self, api_key: str) -> List[dict]:
         try:
-            genai.configure(api_key=api_key)
-            models_list = genai.list_models()
+            client = self._get_client(api_key)
+            # Providing stable defaults for the new SDK to ensure reliability
             return [
-                {"id": f"gemini/{m.name.replace('models/', '')}", "name": m.display_name} 
-                for m in models_list if "generateContent" in m.supported_generation_methods
+                {"id": "gemini/gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+                {"id": "gemini/gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+                {"id": "gemini/gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash Exp"}
             ]
         except Exception as e:
             logger.error(f">>> PROVIDER: GeminiNative ListModels Error: {str(e)}")
