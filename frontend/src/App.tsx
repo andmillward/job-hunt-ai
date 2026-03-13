@@ -130,7 +130,7 @@ function App() {
       />
 
       <div className="flex-1 pl-64 overflow-y-auto">
-        <div className="p-10 max-w-6xl mx-auto">
+        <div className={`p-10 mx-auto ${activeTab === 'workspace' ? 'max-w-none' : 'max-w-6xl'}`}>
           {activeTab === 'hub' && (
             <HubView 
               resumes={resumes}

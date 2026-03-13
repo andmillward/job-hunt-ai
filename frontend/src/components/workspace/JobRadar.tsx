@@ -1,5 +1,5 @@
 import React from 'react'
-import { Radar, Loader2, Zap, TrendingUp } from 'lucide-react'
+import { Radar, Loader2, TrendingUp } from 'lucide-react'
 import { Job } from '../../types'
 import JobCard from './JobCard'
 
@@ -64,20 +64,12 @@ const JobRadar: React.FC<JobRadarProps> = ({
           </div>
           <div className="flex gap-3 pt-4">
             <button 
-              onClick={() => onRankJobs(10)} 
-              disabled={rankingJobs || unrankedCount === 0}
-              className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
-            >
-              <Zap className="w-4 h-4 text-amber-500" />
-              Eco-Scan (10)
-            </button>
-            <button 
               onClick={() => onRankJobs(scanLimit)} 
               disabled={rankingJobs || unrankedCount === 0}
-              className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-3 shadow-xl shadow-indigo-500/20 active:scale-95 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400"
+              className="bg-indigo-600 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-3 shadow-xl shadow-indigo-500/20 active:scale-95 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400"
             >
               {rankingJobs ? <Loader2 className="animate-spin w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-              {rankingJobs ? 'Scoring Batch...' : `Deep Scan (${scanLimit === 0 ? '∞' : scanLimit})`}
+              {rankingJobs ? 'Scoring Batch...' : `Scan Alignment (${scanLimit === 0 ? '∞' : scanLimit})`}
             </button>
           </div>
         </div>
@@ -91,7 +83,7 @@ const JobRadar: React.FC<JobRadarProps> = ({
           </div>
           <span className="text-[10px] font-black text-indigo-600 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 rounded-full">{rankedJobs.length} Primary Listings</span>
         </div>
-        <div className="max-h-[700px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {rankedJobs.length === 0 ? (
             <div className="p-40 text-center text-slate-400 text-sm font-medium italic">
               {searchingJobs || runningNet ? 'Deploying search agents. Results will appear shortly...' : 'Your Radar is empty. Deploy an agent to begin.'}

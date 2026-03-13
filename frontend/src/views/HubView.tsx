@@ -21,13 +21,13 @@ const HubView: React.FC<HubViewProps> = ({
   onDelete
 }) => {
   return (
-    <div className="space-y-10 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <header>
         <h2 className="text-4xl font-black tracking-tight text-slate-900 dark:text-white">Resume Hub</h2>
         <p className="text-slate-500 dark:text-slate-400 font-medium mt-2">Manage your career profiles and launch specialized hunts.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         <ResumeUpload onUpload={onUpload} uploading={uploading} />
         <ResumeList 
           resumes={resumes} 

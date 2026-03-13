@@ -16,7 +16,7 @@ const ResumeList: React.FC<ResumeListProps> = ({ resumes, selectedResume, onSele
         <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest">Saved Profiles</h3>
         <span className="bg-indigo-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{resumes.length}</span>
       </div>
-      <div className="max-h-[500px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+      <div className="max-h-[600px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
         {resumes.length === 0 ? (
           <div className="p-20 text-center text-slate-400 italic text-sm">No profiles found. Upload one to start!</div>
         ) : (

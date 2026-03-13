@@ -1,5 +1,5 @@
 import React from 'react'
-import { Settings, Loader2, Cpu, CheckCircle, Database, Radio, ChevronDown } from 'lucide-react'
+import { Settings as SettingsIcon, Loader2, Database, Radio, ChevronDown, Key, Globe, Cpu } from 'lucide-react'
 import { AIModel } from '../types'
 
 interface SettingsViewProps {
@@ -21,8 +21,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateSetting,
   onRefreshModels
 }) => {
+  const currentModel = settings.AI_MODEL || 'gemini/gemini-1.5-flash'
+
   return (
-    <div className="max-w-2xl mx-auto animate-in zoom-in-95 duration-500">
+    <div className="max-w-2xl mx-auto animate-in zoom-in-95 duration-500 pb-20">
       <header className="mb-12 text-center">
         <h2 className="text-4xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Configuration</h2>
         <p className="text-slate-500 dark:text-slate-400 mt-2 font-black uppercase tracking-[0.2em] text-[10px]">Neural Interface & API Control</p>
@@ -31,28 +33,41 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="space-y-8">
           <div className="flex items-center gap-4 border-b border-slate-100 dark:border-slate-800 pb-6">
             <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500">
-              <Settings className="w-6 h-6" />
+              <SettingsIcon className="w-6 h-6" />
             </div>
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">AI Credentials</h3>
           </div>
           <div className="grid grid-cols-1 gap-10">
-            {['OLLAMA_URL', 'GEMINI_API_KEY', 'JSEARCH_API_KEY', 'OPENAI_API_KEY'].map(k => (
-              <div key={k}>
-                <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-4">{k.replace(/_/g, ' ')}</label>
-                <div className="flex gap-3">
-                  <input 
-                    type={k.includes('KEY') ? 'password' : 'text'} 
-                    placeholder={k === 'OLLAMA_URL' ? 'http://localhost:11434' : `Enter ${k.split('_')[0]} Key...`} 
-                    value={settings[k] || ''} 
-                    onChange={(e) => setSettings({...settings, [k]: e.target.value})} 
-                    className="flex-1 p-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none font-bold placeholder:text-slate-400" 
-                  />
-                  <button onClick={() => onUpdateSetting(k, settings[k])} disabled={savingSettings} className="px-8 py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all active:scale-95">
-                    {savingSettings ? <Loader2 className="animate-spin w-4 h-4" /> : 'Store'}
-                  </button>
+            {['OLLAMA_URL', 'GEMINI_API_KEY', 'JSEARCH_API_KEY', 'OPENAI_API_KEY'].map(k => {
+              const label = k.replace(/_/g, ' ')
+              const isUrl = k.includes('URL')
+              const Icon = isUrl ? Globe : (k.includes('OLLAMA') ? Cpu : Key)
+              
+              return (
+                <div key={k} className="relative group">
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-4">
+                    <Icon className="w-3 h-3" /> {label}
+                  </label>
+                  <div className="flex gap-3">
+                    <input 
+                      name={k}
+                      type={k.includes('KEY') ? 'password' : 'text'} 
+                      placeholder={k === 'OLLAMA_URL' ? 'http://localhost:11434' : `Enter ${label}...`} 
+                      value={settings[k] || ''} 
+                      onChange={(e) => setSettings({ ...settings, [k]: e.target.value })}
+                      className="flex-1 p-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none font-bold placeholder:text-slate-400 focus:border-indigo-500 transition-colors" 
+                    />
+                    <button 
+                      onClick={() => onUpdateSetting(k, settings[k])} 
+                      disabled={savingSettings} 
+                      className="px-8 py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+                    >
+                      {savingSettings ? <Loader2 className="animate-spin w-4 h-4" /> : 'Store'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
         <div className="space-y-8 pt-6 border-t border-slate-100 dark:border-slate-800">
@@ -65,18 +80,22 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           
           <div className="relative group">
             <select 
-              value={settings.AI_MODEL || 'gemini/gemini-1.5-flash'} 
+              value={currentModel} 
               onChange={(e) => onUpdateSetting('AI_MODEL', e.target.value)} 
               className="w-full p-6 bg-slate-50 dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 rounded-[2rem] font-black text-sm appearance-none shadow-xl text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 transition-all cursor-pointer"
             >
               <optgroup label="✨ Cloud Intelligence (Gemini)">
                 <option value="gemini/gemini-1.5-flash">Gemini 1.5 Flash (Optimized)</option>
                 <option value="gemini/gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
-                {geminiModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {geminiModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
               </optgroup>
               {ollamaModels.length > 0 && (
                 <optgroup label="🏠 Local Neural Engine (Ollama)">
-                  {ollamaModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  {ollamaModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
                 </optgroup>
               )}
               <optgroup label="🧠 Alternative (OpenAI)">

@@ -48,6 +48,13 @@ export const useSettings = (showToast: any) => {
     }
   }
 
+  // Trigger auto-detect when settings are first loaded
+  useEffect(() => {
+    if (Object.keys(settings).length > 0) {
+      handleAutoDetect()
+    }
+  }, [settings.GEMINI_API_KEY, settings.OLLAMA_URL, handleAutoDetect])
+
   return {
     settings,
     setSettings,
