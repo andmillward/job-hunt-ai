@@ -16,6 +16,17 @@ class SettingUpdate(BaseModel):
     key: str
     value: str
 
+class CompanyIntelResponse(BaseModel):
+    name: str
+    bio: Optional[str]
+    glassdoor_score: Optional[str]
+    reddit_sentiment: Optional[str] = None
+    twitter_sentiment: Optional[str] = None
+    overall_sentiment_score: Optional[int] = 5
+    last_updated_at: Any
+
+    model_config = ConfigDict(from_attributes=True)
+
 class JobAlignmentResponse(BaseModel):
     id: int
     score_skills: int
@@ -48,8 +59,14 @@ class JobListingResponse(BaseModel):
     status: str
     created_at: Any
     
+    # MIL-45: Grouping
+    parent_id: Optional[int] = None
+    
     # MIL-44: Alignments for the current resume
     alignments: List[JobAlignmentResponse] = []
+    
+    # NEW: Company Intel
+    company_intel: Optional[CompanyIntelResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
 

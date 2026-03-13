@@ -3,6 +3,7 @@ import os
 import asyncio
 import json
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from datetime import datetime, timedelta
 from ..models import models
 from ..providers.search.jobspy_provider import JobSpyProvider
@@ -99,15 +100,91 @@ class JobService:
             except Exception as e:
                 logger.error(f">>> SERVICE: Job Search Failure for {name}: {str(e)}")
         
+        # Automatically trigger deduplication for new items
+        await cls.deduplicate_jobs(db)
+        
         return {"found": total_found, "new": total_new}
+
+    @classmethod
+    async def synthesize_company_intel(cls, db: Session, company_names: List[str]):
+        if not company_names:
+            return
+
+        logger.info(f">>> SERVICE: Synthesizing intel for {len(company_names)} companies (batched)")
+        
+        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
+        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = gemini_key
+        
+        if not api_key:
+            logger.warning(">>> SERVICE: Skipping company intel synthesis - API Key missing")
+            return
+
+        provider = ResumeService.get_provider(db)
+        
+        # Process in batches of 5 for deep sentiment analysis to avoid overloading context/rate limits
+        batch_size = 5
+        for i in range(0, len(company_names), batch_size):
+            batch = company_names[i:i + batch_size]
+            
+            prompt = f"""
+            Provide company intelligence for the following companies. 
+            For each, research (or use internal knowledge) to provide:
+            1. A brief bio/synopsis.
+            2. Estimated Glassdoor rating.
+            3. Recent Reddit sentiment summary (what employees/users are saying).
+            4. Twitter (X) vibe (is the company trending, controversial, or stable).
+            5. An overall sentiment score from 1-10 (10 being best place to work).
+            
+            Companies: {", ".join(batch)}
+            
+            Return ONLY a JSON array of objects. Each object MUST have:
+            - name: string (exactly as provided)
+            - bio: string (max 250 chars)
+            - glassdoor_score: string (e.g. "4.2/5")
+            - reddit_sentiment: string (max 200 chars)
+            - twitter_sentiment: string (max 200 chars)
+            - overall_sentiment_score: integer (1-10)
+            """
+            
+            try:
+                resp = provider.complete(prompt, model, api_key)
+                if "```json" in resp:
+                    resp = resp.split("```json")[1].split("```")[0].strip()
+                elif "```" in resp:
+                    resp = resp.split("```")[1].split("```")[0].strip()
+                
+                intel_list = json.loads(resp)
+                for intel in intel_list:
+                    name = intel.get("name")
+                    if not name: continue
+                    
+                    # Update or Create
+                    db_intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == name).first()
+                    if not db_intel:
+                        db_intel = models.CompanyIntel(name=name)
+                        db.add(db_intel)
+                    
+                    db_intel.bio = intel.get("bio", "")
+                    db_intel.glassdoor_score = intel.get("glassdoor_score", "N/A")
+                    db_intel.reddit_sentiment = intel.get("reddit_sentiment", "")
+                    db_intel.twitter_sentiment = intel.get("twitter_sentiment", "")
+                    db_intel.overall_sentiment_score = intel.get("overall_sentiment_score", 5)
+                    db_intel.last_updated_at = datetime.utcnow()
+                    
+                db.commit()
+                # Brief pause between batches if many to respect AI rate limits
+                if len(company_names) > batch_size:
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f">>> SERVICE: Failed to synthesize batch {i}: {str(e)}")
 
     @staticmethod
     def get_jobs(db: Session, status: Optional[str] = None, resume_id: Optional[int] = None):
-        query = db.query(models.JobListing)
+        # Only return parent jobs (primary listings)
+        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
         if status:
             query = query.filter(models.JobListing.status == status)
-        
-        # When fetching jobs, we want the results ordered by creation but later we will sort by ranking score in frontend
         return query.order_by(models.JobListing.created_at.desc()).all()
 
     @staticmethod
@@ -125,7 +202,6 @@ class JobService:
     async def generate_search_net(cls, db: Session, dream_role: str, resume_id: Optional[int] = None) -> List[models.SavedSearch]:
         logger.info(f">>> SERVICE: Generating resume-aware search net")
         
-        # Persist the dream role on the resume for future ranking
         resume = None
         if resume_id:
             resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
@@ -143,7 +219,6 @@ class JobService:
 
         provider = ResumeService.get_provider(db)
         
-        # Build a resume-aware prompt
         resume_context = ""
         if resume:
             resume_context = f"""
@@ -265,6 +340,7 @@ class JobService:
         
         total_found = 0
         total_new = 0
+        start_time = datetime.utcnow()
         
         for search in verified_searches:
             levers = {
@@ -281,9 +357,18 @@ class JobService:
             db.commit()
             await asyncio.sleep(2) 
             
+        # MIL-45: Staleness Logic
+        stale_threshold = start_time - timedelta(minutes=5)
+        stale_count = db.query(models.JobListing).filter(
+            models.JobListing.status == "new",
+            models.JobListing.last_seen_at < stale_threshold
+        ).update({models.JobListing.status: "closed"})
+        db.commit()
+            
         return {
             "found": total_found, 
             "new": total_new, 
+            "closed": stale_count,
             "was_recent": recent_run is not None,
             "last_run": recent_run.last_run_at.isoformat() if recent_run else None
         }
@@ -297,11 +382,10 @@ class JobService:
             raise Exception("Resume profile not found")
 
         # Get jobs to rank
-        query = db.query(models.JobListing)
+        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
         if job_ids:
             query = query.filter(models.JobListing.id.in_(job_ids))
         else:
-            # Rank jobs that don't have an alignment for this resume yet
             already_ranked = db.query(models.JobAlignment.job_id).filter(models.JobAlignment.resume_id == resume_id).all()
             already_ranked_ids = [r[0] for r in already_ranked]
             query = query.filter(~models.JobListing.id.in_(already_ranked_ids))
@@ -310,6 +394,17 @@ class JobService:
         if not jobs_to_rank:
             return {"status": "complete", "ranked_count": 0}
 
+        # --- STEP 1: Ensure Company Intel exists for this batch ---
+        companies_needed = list(set([j.company for j in jobs_to_rank]))
+        existing_intel = db.query(models.CompanyIntel.name).filter(models.CompanyIntel.name.in_(companies_needed)).all()
+        existing_names = [r[0] for r in existing_intel]
+        missing_names = [c for c in companies_needed if c not in existing_names]
+        
+        if missing_names:
+            logger.info(f">>> SERVICE: Missing intel for {len(missing_names)} companies in ranking batch. Fetching...")
+            await cls.synthesize_company_intel(db, missing_names)
+
+        # --- STEP 2: Scored the batch with Company Context ---
         logger.info(f">>> SERVICE: Ranking batch of {len(jobs_to_rank)} jobs for resume {resume_id}")
 
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
@@ -321,7 +416,7 @@ class JobService:
 
         provider = ResumeService.get_provider(db)
 
-        # Build context and combined job list for batch prompt
+        # Build context from resume
         context = f"""
         User Dream Role Preferences: {resume.dream_role}
         User Technical Skills: {resume.parsed_skills}
@@ -329,15 +424,23 @@ class JobService:
         
         jobs_data = []
         for j in jobs_to_rank:
+            # Attach intel if available for prompt context
+            intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == j.company).first()
+            intel_context = ""
+            if intel:
+                intel_context = f"Company Sentiment: {intel.overall_sentiment_score}/10. Glassdoor: {intel.glassdoor_score}. Reddit info: {intel.reddit_sentiment}"
+
             jobs_data.append({
                 "id": j.id,
                 "title": j.title,
                 "company": j.company,
-                "description": j.description[:1500] if j.description else ""
+                "description": j.description[:1500] if j.description else "",
+                "company_context": intel_context
             })
 
         prompt = f"""
         Score the following batch of job listings against the user profile.
+        Use the 'company_context' provided to influence the 'score_culture' and 'score_overall'.
         
         {context}
         
@@ -347,14 +450,9 @@ class JobService:
         Return ONLY a JSON array of objects. Each object MUST include:
         - id: the integer ID of the job from the input list
         - score_skills: integer (1-10)
-        - score_culture: integer (1-10, based on benefits/paternity/PTO/remote preferences)
+        - score_culture: integer (1-10, based on benefits/paternity/PTO/remote preferences AND the provided company context)
         - score_overall: integer (1-10)
-        - ai_insight: string (max 150 chars, specific reason for alignment)
-        
-        Example Output:
-        [
-          {{"id": 123, "score_skills": 9, "score_culture": 8, "score_overall": 9, "ai_insight": "Perfect match for Kotlin and remote needs."}}
-        ]
+        - ai_insight: string (max 150 chars, specific reason for alignment including company vibe if relevant)
         """
         
         try:
@@ -388,3 +486,63 @@ class JobService:
         except Exception as e:
             logger.error(f">>> SERVICE: Batch Ranking Failure: {str(e)}")
             raise e
+
+    # --- MIL-45: Deduplication ---
+
+    @classmethod
+    async def deduplicate_jobs(cls, db: Session):
+        logger.info(">>> SERVICE: Running AI Deduplication")
+        jobs = db.query(models.JobListing).filter(models.JobListing.parent_id == None, models.JobListing.status != "duplicate").all()
+        
+        company_groups = {}
+        for job in jobs:
+            if job.company not in company_groups:
+                company_groups[job.company] = []
+            company_groups[job.company].append(job)
+            
+        deduped_count = 0
+        
+        for company, group in company_groups.items():
+            if len(group) < 2: continue
+            
+            model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
+            gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+            api_key = gemini_key
+            
+            if not api_key: continue
+            provider = ResumeService.get_provider(db)
+            
+            group_data = [{"id": j.id, "title": j.title} for j in group]
+            
+            prompt = f"""
+            Identify which of the following job titles from company '{company}' are effectively the same job listing.
+            
+            Jobs:
+            {json.dumps(group_data, indent=2)}
+            
+            Return ONLY a JSON array of arrays. Each inner array is a group of IDs that are duplicates.
+            The FIRST ID in each inner array will be considered the 'Primary' listing.
+            """
+            
+            try:
+                resp = provider.complete(prompt, model, api_key)
+                if "```json" in resp:
+                    resp = resp.split("```json")[1].split("```")[0].strip()
+                elif "```" in resp:
+                    resp = resp.split("```")[1].split("```")[0].strip()
+                
+                duplicate_groups = json.loads(resp)
+                for dg in duplicate_groups:
+                    if len(dg) < 2: continue
+                    primary_id = dg[0]
+                    for dup_id in dg[1:]:
+                        dup_job = db.query(models.JobListing).filter(models.JobListing.id == dup_id).first()
+                        if dup_job:
+                            dup_job.parent_id = primary_id
+                            dup_job.status = "duplicate"
+                            deduped_count += 1
+                db.commit()
+            except Exception as e:
+                logger.error(f">>> SERVICE: Deduplication batch failed: {str(e)}")
+                
+        return {"status": "success", "deduped_count": deduped_count}

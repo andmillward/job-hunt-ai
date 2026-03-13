@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary, Boolean, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from datetime import datetime
 from app.database import Base
 
@@ -65,10 +65,15 @@ class JobListing(Base):
     posted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="new") # new, applied, rejected, interviewing, closed
+    status = Column(String, default="new") # new, applied, rejected, interviewing, closed, duplicate
 
-    # Relationship to alignments
+    # MIL-45: Support grouping
+    parent_id = Column(Integer, ForeignKey("job_listings.id", ondelete="SET NULL"), nullable=True)
+    
+    # Relationships
     alignments = relationship("JobAlignment", back_populates="job", cascade="all, delete-orphan")
+    company_intel = relationship("CompanyIntel", primaryjoin="foreign(JobListing.company) == CompanyIntel.name", uselist=False, viewonly=True)
+    duplicates = relationship("JobListing", backref=backref("parent", remote_side=[id]))
 
 class SavedSearch(Base):
     __tablename__ = "saved_searches"
@@ -108,3 +113,17 @@ class JobAlignment(Base):
     # Relationships
     job = relationship("JobListing", back_populates="alignments")
     resume = relationship("Resume", back_populates="alignments")
+
+class CompanyIntel(Base):
+    __tablename__ = "company_intel"
+
+    name = Column(String, primary_key=True)
+    bio = Column(Text, nullable=True)
+    glassdoor_score = Column(String, nullable=True)
+    
+    # MIL-44 enhanced sentiment
+    reddit_sentiment = Column(Text, nullable=True)
+    twitter_sentiment = Column(Text, nullable=True)
+    overall_sentiment_score = Column(Integer, default=5) # 1-10
+    
+    last_updated_at = Column(DateTime, default=datetime.utcnow)

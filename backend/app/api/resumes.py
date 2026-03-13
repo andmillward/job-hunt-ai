@@ -1,9 +1,10 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.resume_service import ResumeService
+from ..services.automation_service import AutomationService
 from ..schemas.schemas import ResumeResponse
-from typing import List
+from typing import List, Optional
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -23,3 +24,11 @@ def delete_resume(resume_id: int, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Resume not found")
     return {"status": "success"}
+
+@router.get("/{resume_id}/automation-script")
+def get_automation_script(resume_id: int, platform: str = "general", db: Session = Depends(get_db)):
+    try:
+        script = AutomationService.generate_greasemonkey_script(db, resume_id, platform)
+        return Response(content=script, media_type="text/javascript")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
