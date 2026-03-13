@@ -6,6 +6,7 @@ from ..schemas.schemas import SettingUpdate
 import google.generativeai as genai
 import os
 import logging
+import httpx
 
 logger = logging.getLogger("uvicorn")
 router = APIRouter(tags=["settings"])
@@ -33,5 +34,31 @@ def list_gemini_models(db: Session = Depends(get_db)):
                 results.append({"id": model_id, "name": m.display_name})
         return results
     except Exception as e:
-        logger.error(f"Error listing models: {e}")
+        logger.error(f"Error listing gemini models: {e}")
+        return []
+
+@router.get("/models/ollama")
+async def list_ollama_models(db: Session = Depends(get_db)):
+    url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
+    url = url.rstrip("/")
+    logger.info(f">>> SETTINGS: Fetching Ollama models from {url}")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{url}/api/tags")
+            if response.status_code == 200:
+                models_data = response.json().get("models", [])
+                logger.info(f">>> SETTINGS: Found {len(models_data)} Ollama models")
+                results = []
+                for m in models_data:
+                    model_name = m.get("name")
+                    results.append({
+                        "id": f"ollama/{model_name}",
+                        "name": f"Ollama: {model_name}"
+                    })
+                return results
+            else:
+                logger.error(f">>> SETTINGS: Ollama returned status {response.status_code}")
+                return []
+    except Exception as e:
+        logger.error(f">>> SETTINGS: Error listing ollama models at {url}: {e}")
         return []

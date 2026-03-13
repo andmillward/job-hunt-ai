@@ -7,6 +7,7 @@ from ..models import models
 from .settings_service import SettingsService
 from ..providers.ai.gemini_provider import GeminiNativeProvider
 from ..providers.ai.litellm_provider import LiteLLMProvider
+from ..providers.ai.ollama_provider import OllamaProvider
 import os
 
 logger = logging.getLogger("uvicorn")
@@ -25,6 +26,8 @@ class ResumeService:
     @staticmethod
     def get_provider(db: Session):
         provider_type = SettingsService.get_ai_provider_type(db)
+        if provider_type == "ollama":
+            return OllamaProvider()
         if provider_type == "native":
             return GeminiNativeProvider()
         return LiteLLMProvider()
@@ -34,15 +37,18 @@ class ResumeService:
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
         
         api_key = gemini_key if "gemini" in model.lower() else openai_key
         
-        if not api_key:
+        provider = cls.get_provider(db)
+        
+        # Validation
+        if not api_key and "ollama/" not in model.lower():
             return {"skills": ["Error: API Key missing"], "experience": "Please set your key in Settings.", "education": ""}
 
-        provider = cls.get_provider(db)
         try:
-            return provider.parse_resume(text, model, api_key)
+            return provider.parse_resume(text, model, api_key, ollama_url=ollama_url)
         except Exception as e:
             logger.error(f">>> SERVICE: AI Parsing Failure: {str(e)}")
             return {

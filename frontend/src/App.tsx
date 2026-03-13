@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { FileUp, Briefcase, FileText, Settings, Loader2, CheckCircle, AlertCircle, Code, Eye, ExternalLink, X, Moon, Sun, Trash2, Globe, Send, DollarSign, Clock, Search, ListFilter, ArrowLeft, LayoutDashboard, Target, Sparkles, Radar, Radio, TrendingUp, Info, Bug, Building2, Star, ChevronDown, ChevronUp, Copy, Zap, Download, MessageSquare, Twitter } from 'lucide-react'
+import { FileUp, Briefcase, FileText, Settings, Loader2, CheckCircle, AlertCircle, Code, Eye, ExternalLink, X, Moon, Sun, Trash2, Globe, Send, DollarSign, Clock, Search, ListFilter, ArrowLeft, LayoutDashboard, Target, Sparkles, Radar, Radio, TrendingUp, Info, Bug, Building2, Star, ChevronDown, ChevronUp, Copy, Zap, Download, MessageSquare, Twitter, Cpu, Database } from 'lucide-react'
 import axios from 'axios'
 
 const API_BASE_URL = 'http://localhost:8080/api'
@@ -14,9 +14,10 @@ interface Resume {
   createdAt: string
 }
 
-interface GeminiModel {
+interface AIModel {
   id: string
   name: string
+  provider: 'gemini' | 'ollama' | 'openai'
 }
 
 interface CompanyIntel {
@@ -85,7 +86,8 @@ function App() {
   // Settings state
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [savingSettings, setSavingSettings] = useState(false)
-  const [fetchedModels, setFetchedModels] = useState<GeminiModel[]>([])
+  const [geminiModels, setGeminiModels] = useState<AIModel[]>([])
+  const [ollamaModels, setOllamaModels] = useState<AIModel[]>([])
 
   // Jobs state
   const [jobs, setJobs] = useState<Job[]>([])
@@ -182,25 +184,37 @@ function App() {
     }
   }, [])
 
-  const handleAutoDetect = useCallback(async (keyToUse?: string) => {
-    const key = keyToUse || settings.GEMINI_API_KEY
-    if (!key) return
+  const handleAutoDetect = useCallback(async () => {
+    console.log(">>> UI: Auto-detecting models...")
+    
+    // Fetch Gemini independently
+    axios.get(`${API_BASE_URL}/models/gemini`)
+      .then(resp => {
+        console.log(">>> UI: Gemini models found:", resp.data.length)
+        setGeminiModels(resp.data.map((m: any) => ({ ...m, provider: 'gemini' })))
+      })
+      .catch(e => console.error(">>> UI: Could not fetch Gemini models", e))
 
-    try {
-      const resp = await axios.get(`${API_BASE_URL}/models/gemini`)
-      if (resp.data.length > 0) {
-        setFetchedModels(resp.data)
-      }
-    } catch (e) {
-      console.error("Could not auto-detect models", e)
-    }
-  }, [settings.GEMINI_API_KEY])
+    // Fetch Ollama independently
+    axios.get(`${API_BASE_URL}/models/ollama`)
+      .then(resp => {
+        console.log(">>> UI: Ollama models found:", resp.data.length)
+        setOllamaModels(resp.data.map((m: any) => ({ ...m, provider: 'ollama' })))
+      })
+      .catch(e => console.error(">>> UI: Could not fetch Ollama models", e))
+  }, [])
 
   useEffect(() => {
     fetchResumes()
     fetchSettings()
     fetchJobs()
   }, [fetchResumes, fetchSettings, fetchJobs])
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      handleAutoDetect()
+    }
+  }, [activeTab, handleAutoDetect])
 
   useEffect(() => {
     fetchSavedSearches()
@@ -212,7 +226,7 @@ function App() {
       await axios.post(`${API_BASE_URL}/settings`, { key, value })
       setSettings(prev => ({ ...prev, [key]: value }))
       showToast(`${key.replace(/_/g, ' ')} saved successfully`)
-      if (key === 'GEMINI_API_KEY') handleAutoDetect(value)
+      if (key === 'GEMINI_API_KEY' || key === 'OLLAMA_URL') handleAutoDetect()
     } catch (err) {
       console.error('Error updating setting', err)
       showToast('Failed to save setting', 'error')
@@ -554,6 +568,7 @@ function App() {
             </div>
           )}
 
+          {/* WORKSPACE VIEW */}
           {activeTab === 'workspace' && selectedResume && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
                <header className="flex justify-between items-start">
@@ -900,11 +915,17 @@ function App() {
                         <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">AI Credentials</h3>
                       </div>
                       <div className="grid grid-cols-1 gap-10">
-                        {['GEMINI_API_KEY', 'JSEARCH_API_KEY', 'OPENAI_API_KEY'].map(k => (
+                        {['OLLAMA_URL', 'GEMINI_API_KEY', 'JSEARCH_API_KEY', 'OPENAI_API_KEY'].map(k => (
                            <div key={k}>
                               <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-4">{k.replace(/_/g, ' ')}</label>
                               <div className="flex gap-3">
-                                 <input type="password" placeholder={`Enter ${k.split('_')[0]} Key...`} value={settings[k] || ''} onChange={(e) => setSettings({...settings, [k]: e.target.value})} className="flex-1 p-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none font-bold placeholder:text-slate-400" />
+                                 <input 
+                                    type={k.includes('KEY') ? 'password' : 'text'} 
+                                    placeholder={k === 'OLLAMA_URL' ? 'http://localhost:11434' : `Enter ${k.split('_')[0]} Key...`} 
+                                    value={settings[k] || ''} 
+                                    onChange={(e) => setSettings({...settings, [k]: e.target.value})} 
+                                    className="flex-1 p-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none font-bold placeholder:text-slate-400" 
+                                 />
                                  <button onClick={() => updateSetting(k, settings[k])} disabled={savingSettings} className="px-8 py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all active:scale-95">
                                     {savingSettings ? <Loader2 className="animate-spin w-4 h-4" /> : 'Store'}
                                  </button>
@@ -916,16 +937,33 @@ function App() {
                    <div className="space-y-8 pt-6 border-t border-slate-100 dark:border-slate-800">
                       <div className="flex justify-between items-center">
                         <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-4">
-                           <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-500"><Code className="w-5 h-5" /></div> Active Neural Model
+                           <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-500"><Database className="w-5 h-5" /></div> Model Selection
                         </h3>
-                        <button onClick={() => handleAutoDetect()} className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 text-slate-600 px-4 py-2 rounded-xl uppercase tracking-widest hover:bg-slate-200 active:scale-95 transition-all">Refresh List</button>
+                        <button onClick={() => handleAutoDetect()} className="text-[10px] font-black bg-slate-100 dark:bg-slate-800 text-slate-600 px-4 py-2 rounded-xl uppercase tracking-widest hover:bg-slate-200 active:scale-95 transition-all flex items-center gap-2"><Radio className="w-3.5 h-3.5" /> Refresh Models</button>
                       </div>
-                      <select value={settings.AI_MODEL || 'gemini/gemini-1.5-flash'} onChange={(e) => updateSetting('AI_MODEL', e.target.value)} className="w-full p-5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl font-black text-sm appearance-none shadow-inner text-slate-900 dark:text-slate-100">
-                        <option value="gemini/gemini-1.5-flash">Gemini 1.5 Flash (Default)</option>
-                        <option value="gemini/gemini-1.5-pro">Gemini 1.5 Pro</option>
-                        {fetchedModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        <option value="gpt-4o">GPT-4o (OpenAI)</option>
-                      </select>
+                      
+                      <div className="relative group">
+                         <select 
+                           value={settings.AI_MODEL || 'gemini/gemini-1.5-flash'} 
+                           onChange={(e) => updateSetting('AI_MODEL', e.target.value)} 
+                           className="w-full p-6 bg-slate-50 dark:bg-slate-950 border-2 border-slate-200 dark:border-slate-800 rounded-[2rem] font-black text-sm appearance-none shadow-xl text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                         >
+                           <optgroup label="✨ Cloud Intelligence (Gemini)">
+                              <option value="gemini/gemini-1.5-flash">Gemini 1.5 Flash (Optimized)</option>
+                              <option value="gemini/gemini-1.5-pro">Gemini 1.5 Pro (Deep Reasoning)</option>
+                              {geminiModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                           </optgroup>
+                           {ollamaModels.length > 0 && (
+                              <optgroup label="🏠 Local Neural Engine (Ollama)">
+                                 {ollamaModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                              </optgroup>
+                           )}
+                           <optgroup label="🧠 Alternative (OpenAI)">
+                              <option value="gpt-4o">GPT-4o (Standard)</option>
+                           </optgroup>
+                         </select>
+                         <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none group-hover:text-indigo-500 transition-colors" />
+                      </div>
                    </div>
                 </div>
              </div>

@@ -32,7 +32,8 @@ class SettingsService:
     def get_ai_provider_type(db: Session) -> str:
         # Logic to decide which provider to use
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
+        if "ollama/" in model.lower():
+            return "ollama"
         if "gemini" in model.lower():
             return "native"
         return "litellm"
-

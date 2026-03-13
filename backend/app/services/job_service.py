@@ -17,6 +17,37 @@ logger = logging.getLogger("uvicorn")
 
 class JobService:
     @staticmethod
+    def _clean_json_response(text: str) -> str:
+        """Extracts JSON content from potentially markdown-wrapped AI responses."""
+        if not text:
+            return "[]"
+        cleaned = text.strip()
+        
+        # Handle triple backticks
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned:
+            cleaned = cleaned.split("```")[1].split("```")[0].strip()
+            
+        # Remove any non-JSON prefix/suffix (common with conversational models)
+        start_idx = cleaned.find('[')
+        dict_start = cleaned.find('{')
+        
+        # If [ comes first or there is no {
+        if start_idx != -1 and (dict_start == -1 or start_idx < dict_start):
+            end_idx = cleaned.rfind(']')
+            if end_idx != -1:
+                return cleaned[start_idx:end_idx+1]
+        
+        # If { comes first or there is no [
+        if dict_start != -1:
+            end_idx = cleaned.rfind('}')
+            if end_idx != -1:
+                return cleaned[dict_start:end_idx+1]
+                
+        return cleaned
+
+    @staticmethod
     def get_providers(db: Session):
         providers = [
             ("jobspy", JobSpyProvider()),
@@ -114,14 +145,16 @@ class JobService:
         
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
         api_key = gemini_key
         
-        if not api_key:
+        provider = ResumeService.get_provider(db)
+        
+        # Validation for non-ollama
+        if not api_key and "ollama/" not in model.lower():
             logger.warning(">>> SERVICE: Skipping company intel synthesis - API Key missing")
             return
 
-        provider = ResumeService.get_provider(db)
-        
         # Process in batches of 5 for deep sentiment analysis to avoid overloading context/rate limits
         batch_size = 5
         for i in range(0, len(company_names), batch_size):
@@ -148,14 +181,17 @@ class JobService:
             """
             
             try:
-                resp = provider.complete(prompt, model, api_key)
-                if "```json" in resp:
-                    resp = resp.split("```json")[1].split("```")[0].strip()
-                elif "```" in resp:
-                    resp = resp.split("```")[1].split("```")[0].strip()
+                resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+                cleaned_json = cls._clean_json_response(resp_raw)
+                intel_list = json.loads(cleaned_json)
                 
-                intel_list = json.loads(resp)
+                # Ensure it's a list
+                if isinstance(intel_list, dict):
+                    intel_list = [intel_list]
+
                 for intel in intel_list:
+                    if not isinstance(intel, dict): continue
+                    
                     name = intel.get("name")
                     if not name: continue
                     
@@ -212,13 +248,14 @@ class JobService:
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
         api_key = gemini_key if "gemini" in model.lower() else openai_key
         
-        if not api_key:
-            raise Exception("AI API Key missing. Configure in Settings.")
-
         provider = ResumeService.get_provider(db)
         
+        if not api_key and "ollama/" not in model.lower():
+            raise Exception("AI API Key missing. Configure in Settings.")
+
         resume_context = ""
         if resume:
             resume_context = f"""
@@ -244,16 +281,17 @@ class JobService:
         """
         
         try:
-            response_text = provider.complete(prompt, model, api_key)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
+            response_text_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+            cleaned_json = cls._clean_json_response(response_text_raw)
+            search_configs = json.loads(cleaned_json)
             
-            search_configs = json.loads(response_text)
-            
+            if isinstance(search_configs, dict):
+                search_configs = [search_configs]
+
             saved_results = []
             for cfg in search_configs:
+                if not isinstance(cfg, dict): continue
+                
                 kw = cfg.get("keywords")
                 if not kw: continue
                 
@@ -412,12 +450,13 @@ class JobService:
 
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
         api_key = gemini_key 
         
-        if not api_key:
-            raise Exception("AI API Key missing.")
-
         provider = ResumeService.get_provider(db)
+        
+        if not api_key and "ollama/" not in model.lower():
+            raise Exception("AI API Key missing.")
 
         # Build context from resume
         context = f"""
@@ -459,16 +498,18 @@ class JobService:
         """
         
         try:
-            resp = provider.complete(prompt, model, api_key)
-            if "```json" in resp:
-                resp = resp.split("```json")[1].split("```")[0].strip()
-            elif "```" in resp:
-                resp = resp.split("```")[1].split("```")[0].strip()
+            resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+            cleaned_json = cls._clean_json_response(resp_raw)
+            logger.info(f">>> SERVICE: AI returned {len(cleaned_json)} chars of JSON for ranking")
+            results_list = json.loads(cleaned_json)
             
-            results_list = json.loads(resp)
+            if isinstance(results_list, dict):
+                results_list = [results_list]
+
             saved_count = 0
-            
             for res in results_list:
+                if not isinstance(res, dict): continue
+                
                 job_id = res.get("id")
                 if not job_id: continue
                 
@@ -484,6 +525,7 @@ class JobService:
                 saved_count += 1
             
             db.commit()
+            logger.info(f">>> SERVICE: Successfully persisted {saved_count} alignments for resume {resume_id}")
             return {"status": "success", "ranked_count": saved_count}
             
         except Exception as e:
@@ -510,10 +552,12 @@ class JobService:
             
             model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
             gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+            ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
             api_key = gemini_key
             
-            if not api_key: continue
             provider = ResumeService.get_provider(db)
+            
+            if not api_key and "ollama/" not in model.lower(): continue
             
             group_data = [{"id": j.id, "title": j.title} for j in group]
             
@@ -528,15 +572,14 @@ class JobService:
             """
             
             try:
-                resp = provider.complete(prompt, model, api_key)
-                if "```json" in resp:
-                    resp = resp.split("```json")[1].split("```")[0].strip()
-                elif "```" in resp:
-                    resp = resp.split("```")[1].split("```")[0].strip()
+                resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+                cleaned_json = cls._clean_json_response(resp_raw)
+                duplicate_groups = json.loads(cleaned_json)
                 
-                duplicate_groups = json.loads(resp)
+                if not isinstance(duplicate_groups, list): continue
+
                 for dg in duplicate_groups:
-                    if len(dg) < 2: continue
+                    if not isinstance(dg, list) or len(dg) < 2: continue
                     primary_id = dg[0]
                     for dup_id in dg[1:]:
                         dup_job = db.query(models.JobListing).filter(models.JobListing.id == dup_id).first()
