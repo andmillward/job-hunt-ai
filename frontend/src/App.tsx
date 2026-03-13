@@ -562,6 +562,26 @@ function App() {
                         </div>
 
                         <div>
+                          <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-3">JSearch API Key (RapidAPI)</label>
+                          <div className="flex gap-3">
+                            <input 
+                              type="password" 
+                              placeholder="Enter JSearch Key..." 
+                              value={settings.JSEARCH_API_KEY || ''}
+                              onChange={(e) => setSettings({...settings, JSEARCH_API_KEY: e.target.value})}
+                              className="flex-1 p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.25rem] focus:ring-4 focus:ring-indigo-500/10 dark:focus:ring-indigo-500/20 outline-none transition-all font-bold placeholder:text-slate-400" 
+                            />
+                            <button 
+                              onClick={() => updateSetting('JSEARCH_API_KEY', settings.JSEARCH_API_KEY)}
+                              disabled={savingSettings}
+                              className="px-6 py-4 bg-indigo-600 text-white rounded-[1.25rem] font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 disabled:bg-slate-300 dark:disabled:bg-slate-800 transition shadow-lg shadow-indigo-500/20 active:scale-95"
+                            >
+                              {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Store'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
                           <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-3">OpenAI API Key (Optional)</label>
                           <div className="flex gap-3">
                             <input 
