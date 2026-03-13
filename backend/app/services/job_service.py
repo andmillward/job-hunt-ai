@@ -376,7 +376,7 @@ class JobService:
     # --- MIL-44: Ranking Engine ---
 
     @classmethod
-    async def rank_jobs(cls, db: Session, resume_id: int, job_ids: Optional[List[int]] = None, limit: int = 20):
+    async def rank_jobs(cls, db: Session, resume_id: int, job_ids: Optional[List[int]] = None, limit: Optional[int] = 20):
         resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
         if not resume:
             raise Exception("Resume profile not found")
@@ -390,7 +390,10 @@ class JobService:
             already_ranked_ids = [r[0] for r in already_ranked]
             query = query.filter(~models.JobListing.id.in_(already_ranked_ids))
 
-        jobs_to_rank = query.limit(limit).all() 
+        if limit and limit > 0:
+            query = query.limit(limit)
+            
+        jobs_to_rank = query.all() 
         if not jobs_to_rank:
             return {"status": "complete", "ranked_count": 0}
 

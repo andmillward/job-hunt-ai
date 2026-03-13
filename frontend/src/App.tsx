@@ -102,6 +102,7 @@ function App() {
   const [toast, setToast] = useState<Toast | null>(null)
   const [isDarkMode, setIsDarkMode] = useState(true)
   const [expandedJobs, setExpandedJobs] = useState<Record<number, boolean>>({})
+  const [scanLimit, setScanLimit] = useState(20)
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success', action?: () => void) => {
     setToast({ message, type, action })
@@ -350,7 +351,7 @@ function App() {
     try {
       const response = await axios.post(`${API_BASE_URL}/jobs/rank`, { 
         resume_id: currentId,
-        limit: limit
+        limit: limit === 0 ? null : limit
       })
       await fetchJobs()
       showToast(`Ranking complete: Scored ${response.data.ranked_count} opportunities.`)
@@ -407,6 +408,10 @@ function App() {
       if (scoreA !== scoreB) return scoreB - scoreA
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
+  }, [primaryJobs])
+
+  const unrankedCount = useMemo(() => {
+    return primaryJobs.filter(j => (j.alignments?.length || 0) === 0).length
   }, [primaryJobs])
 
   const getDuplicatesFor = (parentId: number) => {
@@ -699,23 +704,38 @@ function App() {
                                  <p className="text-slate-500 text-sm font-medium">Analyze discovered listings against your resume and salary/remote preferences.</p>
                               </div>
                            </div>
-                           <div className="flex gap-3">
-                              <button 
-                                onClick={() => handleRankJobs(10)} 
-                                disabled={rankingJobs || rankedJobs.length === 0}
-                                className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
-                              >
-                                 <Bug className="w-4 h-4" />
-                                 Scan Top 10 (Debug)
-                              </button>
-                              <button 
-                                onClick={() => handleRankJobs(20)} 
-                                disabled={rankingJobs || rankedJobs.length === 0}
-                                className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-3 shadow-xl shadow-indigo-500/20 active:scale-95 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400"
-                              >
-                                 {rankingJobs ? <Loader2 className="animate-spin w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-                                 {rankingJobs ? 'Scoring Batch...' : 'Scan Alignment'}
-                              </button>
+                           <div className="flex items-center gap-4">
+                              <div className="flex flex-col items-end">
+                                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Scan Amount</label>
+                                 <select 
+                                    value={scanLimit} 
+                                    onChange={(e) => setScanLimit(parseInt(e.target.value))}
+                                    className="bg-slate-100 dark:bg-slate-800 border-none rounded-xl px-4 py-2 text-xs font-black text-indigo-600 outline-none cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                                 >
+                                    <option value={10}>10 Items</option>
+                                    <option value={20}>20 Items</option>
+                                    <option value={50}>50 Items</option>
+                                    <option value={0}>No Limit</option>
+                                 </select>
+                              </div>
+                              <div className="flex gap-3 pt-4">
+                                 <button 
+                                    onClick={() => handleRankJobs(10)} 
+                                    disabled={rankingJobs || unrankedCount === 0}
+                                    className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
+                                 >
+                                    <Zap className="w-4 h-4 text-amber-500" />
+                                    Eco-Scan (10)
+                                 </button>
+                                 <button 
+                                    onClick={() => handleRankJobs(scanLimit)} 
+                                    disabled={rankingJobs || unrankedCount === 0}
+                                    className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-3 shadow-xl shadow-indigo-500/20 active:scale-95 disabled:bg-slate-100 dark:disabled:bg-slate-800 disabled:text-slate-400"
+                                 >
+                                    {rankingJobs ? <Loader2 className="animate-spin w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
+                                    {rankingJobs ? 'Scoring Batch...' : `Deep Scan (${scanLimit === 0 ? '∞' : scanLimit})`}
+                                 </button>
+                              </div>
                            </div>
                         </div>
 
