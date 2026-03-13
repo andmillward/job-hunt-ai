@@ -65,6 +65,7 @@ function App() {
     savingSettings,
     geminiModels,
     ollamaModels,
+    openaiModels,
     fetchSettings,
     handleAutoDetect,
     updateSetting
@@ -180,6 +181,7 @@ function App() {
               savingSettings={savingSettings}
               geminiModels={geminiModels}
               ollamaModels={ollamaModels}
+              openaiModels={openaiModels}
               onUpdateSetting={updateSetting}
               onRefreshModels={handleAutoDetect}
             />

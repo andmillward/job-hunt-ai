@@ -13,7 +13,7 @@ class GeminiNativeProvider(BaseAIProvider):
         # Using the new google-genai SDK
         return genai.Client(api_key=api_key)
 
-    def parse_resume(self, text: str, model: str, api_key: str) -> dict:
+    def parse_resume(self, text: str, model: str, api_key: str, **kwargs) -> dict:
         logger.info(f">>> PROVIDER: GeminiNative parsing with {model}")
         try:
             client = self._get_client(api_key)
@@ -48,7 +48,7 @@ class GeminiNativeProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: GeminiNative Error: {str(e)}")
             raise e
 
-    def complete(self, prompt: str, model: str, api_key: str) -> str:
+    def complete(self, prompt: str, model: str, api_key: str, **kwargs) -> str:
         logger.info(f">>> PROVIDER: GeminiNative completing with {model}")
         try:
             client = self._get_client(api_key)
@@ -62,7 +62,7 @@ class GeminiNativeProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: GeminiNative Complete Error: {str(e)}")
             raise e
 
-    def list_models(self, api_key: str) -> List[dict]:
+    def list_models(self, api_key: str, **kwargs) -> List[dict]:
         try:
             client = self._get_client(api_key)
             # Providing stable defaults for the new SDK to ensure reliability

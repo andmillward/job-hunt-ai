@@ -12,4 +12,7 @@ export const settingsService = {
   
   getOllamaModels: () => 
     apiClient.get('/models/ollama'),
+  
+  getOpenAIModels: () => 
+    apiClient.get('/models/openai'),
 }

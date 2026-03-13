@@ -48,6 +48,19 @@ class JobService:
         return cleaned
 
     @staticmethod
+    def _get_ai_credentials(db: Session):
+        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
+        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
+        
+        api_key = gemini_key
+        if "openai/" in model.lower() or "gpt" in model.lower():
+            api_key = openai_key
+            
+        return model, api_key, ollama_url
+
+    @staticmethod
     def get_providers(db: Session):
         providers = [
             ("jobspy", JobSpyProvider()),
@@ -143,11 +156,7 @@ class JobService:
 
         logger.info(f">>> SERVICE: Synthesizing intel for {len(company_names)} companies (batched)")
         
-        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-        api_key = gemini_key
-        
+        model, api_key, ollama_url = cls._get_ai_credentials(db)
         provider = ResumeService.get_provider(db)
         
         # Validation for non-ollama
@@ -245,12 +254,7 @@ class JobService:
                 resume.dream_role = dream_role
                 db.commit()
 
-        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-        api_key = gemini_key if "gemini" in model.lower() else openai_key
-        
+        model, api_key, ollama_url = cls._get_ai_credentials(db)
         provider = ResumeService.get_provider(db)
         
         if not api_key and "ollama/" not in model.lower():
@@ -448,11 +452,7 @@ class JobService:
         # --- STEP 2: Scored the batch with Company Context ---
         logger.info(f">>> SERVICE: Ranking batch of {len(jobs_to_rank)} jobs for resume {resume_id}")
 
-        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-        api_key = gemini_key 
-        
+        model, api_key, ollama_url = cls._get_ai_credentials(db)
         provider = ResumeService.get_provider(db)
         
         if not api_key and "ollama/" not in model.lower():
@@ -550,11 +550,7 @@ class JobService:
         for company, group in company_groups.items():
             if len(group) < 2: continue
             
-            model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-            gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-            ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-            api_key = gemini_key
-            
+            model, api_key, ollama_url = cls._get_ai_credentials(db)
             provider = ResumeService.get_provider(db)
             
             if not api_key and "ollama/" not in model.lower(): continue

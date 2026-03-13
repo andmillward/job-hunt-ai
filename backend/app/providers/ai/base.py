@@ -3,16 +3,16 @@ from typing import List, Optional
 
 class BaseAIProvider(ABC):
     @abstractmethod
-    def parse_resume(self, text: str, model: str, api_key: str) -> dict:
+    def parse_resume(self, text: str, model: str, api_key: str, **kwargs) -> dict:
         """Parse resume text into a structured JSON dict."""
         pass
 
     @abstractmethod
-    def complete(self, prompt: str, model: str, api_key: str) -> str:
+    def complete(self, prompt: str, model: str, api_key: str, **kwargs) -> str:
         """Get a text completion from the AI."""
         pass
 
     @abstractmethod
-    def list_models(self, api_key: str) -> List[dict]:
+    def list_models(self, api_key: str, **kwargs) -> List[dict]:
         """List available models for this provider."""
         pass

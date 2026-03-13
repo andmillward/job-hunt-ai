@@ -8,6 +8,7 @@ interface SettingsViewProps {
   savingSettings: boolean
   geminiModels: AIModel[]
   ollamaModels: AIModel[]
+  openaiModels: AIModel[]
   onUpdateSetting: (key: string, value: string) => void
   onRefreshModels: () => void
 }
@@ -18,6 +19,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   savingSettings,
   geminiModels,
   ollamaModels,
+  openaiModels,
   onUpdateSetting,
   onRefreshModels
 }) => {
@@ -100,6 +102,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               )}
               <optgroup label="🧠 Alternative (OpenAI)">
                 <option value="gpt-4o">GPT-4o (Standard)</option>
+                {openaiModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
               </optgroup>
             </select>
             <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none group-hover:text-indigo-500 transition-colors" />

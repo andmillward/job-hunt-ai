@@ -9,7 +9,7 @@ from .base import BaseAIProvider
 logger = logging.getLogger("uvicorn")
 
 class LiteLLMProvider(BaseAIProvider):
-    def parse_resume(self, text: str, model: str, api_key: str) -> dict:
+    def parse_resume(self, text: str, model: str, api_key: str, **kwargs) -> dict:
         logger.info(f">>> PROVIDER: LiteLLM parsing with {model}")
         
         # Mapping key to env for LiteLLM
@@ -49,7 +49,7 @@ class LiteLLMProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: LiteLLM Error: {str(e)}")
             raise e
 
-    def complete(self, prompt: str, model: str, api_key: str) -> str:
+    def complete(self, prompt: str, model: str, api_key: str, **kwargs) -> str:
         logger.info(f">>> PROVIDER: LiteLLM completing with {model}")
         
         if "gemini" in model.lower():
@@ -68,7 +68,7 @@ class LiteLLMProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: LiteLLM Complete Error: {str(e)}")
             raise e
 
-    def list_models(self, api_key: str) -> List[dict]:
+    def list_models(self, api_key: str, **kwargs) -> List[dict]:
         # LiteLLM doesn't have a universal list_models, usually depends on provider
         # For now, return a basic list or empty
         return []

@@ -62,3 +62,31 @@ async def list_ollama_models(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f">>> SETTINGS: Error listing ollama models at {url}: {e}")
         return []
+
+@router.get("/models/openai")
+async def list_openai_models(db: Session = Depends(get_db)):
+    key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not key:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"}
+            )
+            if response.status_code == 200:
+                models_data = response.json().get("data", [])
+                # Filter for common chat models to avoid clutter
+                results = []
+                for m in models_data:
+                    model_id = m.get("id")
+                    if "gpt" in model_id:
+                        results.append({
+                            "id": f"openai/{model_id}",
+                            "name": f"OpenAI: {model_id}"
+                        })
+                return results
+            return []
+    except Exception as e:
+        logger.error(f"Error listing openai models: {e}")
+        return []
