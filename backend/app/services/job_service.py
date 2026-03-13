@@ -123,6 +123,10 @@ class JobService:
     async def generate_search_net(cls, db: Session, dream_role: str, resume_id: Optional[int] = None) -> List[models.SavedSearch]:
         logger.info(f">>> SERVICE: Generating search net for '{dream_role}'")
         
+        # Persist the dream role on the resume for future ranking
+        if resume_id:
+            ResumeService.update_dream_role(db, resume_id, dream_role)
+
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -211,6 +215,24 @@ class JobService:
             db.commit()
             db.refresh(search)
         return search
+
+    @staticmethod
+    def delete_saved_search(db: Session, search_id: int):
+        search = db.query(models.SavedSearch).filter(models.SavedSearch.id == search_id).first()
+        if search:
+            db.delete(search)
+            db.commit()
+            return True
+        return False
+
+    @staticmethod
+    def clear_unverified_searches(db: Session, resume_id: int):
+        db.query(models.SavedSearch).filter(
+            models.SavedSearch.resume_id == resume_id,
+            models.SavedSearch.is_verified == False
+        ).delete()
+        db.commit()
+        return True
 
     @classmethod
     async def run_verified_searches(cls, db: Session, resume_id: Optional[int] = None):

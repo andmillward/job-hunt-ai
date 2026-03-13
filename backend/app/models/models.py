@@ -14,8 +14,36 @@ class Resume(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     file_data = Column(LargeBinary, nullable=True)
     
+    # MIL-43: Store preference for ranking & recurring search
+    dream_role = Column(Text, nullable=True)
+    
     # Relationship to searches
     searches = relationship("SavedSearch", back_populates="resume", cascade="all, delete-orphan")
+
+    # Property alias for Pydantic
+    @property
+    def fileName(self):
+        return self.file_name
+    
+    @property
+    def parsedSkills(self):
+        return self.parsed_skills
+    
+    @property
+    def parsedExperience(self):
+        return self.parsed_experience
+    
+    @property
+    def parsedEducation(self):
+        return self.parsed_education
+    
+    @property
+    def dreamRole(self):
+        return self.dream_role
+    
+    @property
+    def createdAt(self):
+        return self.created_at
 
 class Setting(Base):
     __tablename__ = "settings"

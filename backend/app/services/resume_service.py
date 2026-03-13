@@ -99,3 +99,12 @@ class ResumeService:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def update_dream_role(db: Session, resume_id: int, dream_role: str):
+        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+        if resume:
+            resume.dream_role = dream_role
+            db.commit()
+            db.refresh(resume)
+        return resume

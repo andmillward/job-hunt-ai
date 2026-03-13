@@ -22,9 +22,10 @@ class ResumeResponse(BaseModel):
     parsedSkills: Optional[str]
     parsedExperience: Optional[str]
     parsedEducation: Optional[str]
+    dreamRole: Optional[str] = None
     createdAt: Any
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 class JobListingResponse(BaseModel):
     id: int
@@ -48,8 +49,8 @@ class SavedSearchResponse(BaseModel):
     job_type: Optional[str]
     hours_old: int
     is_verified: bool
-    last_run_at: Optional[Any]
-    created_at: Any
+    last_run_at: Optional[datetime]
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

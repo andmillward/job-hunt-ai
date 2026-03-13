@@ -23,6 +23,18 @@ def get_saved_searches(resume_id: Optional[int] = None, db: Session = Depends(ge
 def update_saved_search(search_id: int, is_verified: bool, db: Session = Depends(get_db)):
     return JobService.update_saved_search(db, search_id, is_verified)
 
+@router.delete("/saved-searches/{search_id}")
+def delete_saved_search(search_id: int, db: Session = Depends(get_db)):
+    success = JobService.delete_saved_search(db, search_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Search not found")
+    return {"status": "success"}
+
+@router.delete("/saved-searches/unverified/{resume_id}")
+def clear_unverified_searches(resume_id: int, db: Session = Depends(get_db)):
+    JobService.clear_unverified_searches(db, resume_id)
+    return {"status": "success"}
+
 @router.post("/run-verified")
 async def run_verified_searches(request: RunVerifiedRequest, db: Session = Depends(get_db)):
     try:
@@ -43,20 +55,7 @@ async def search_jobs(request: JobSearchRequest, db: Session = Depends(get_db)):
 @router.get("", response_model=List[JobListingResponse])
 def get_jobs(status: Optional[str] = None, db: Session = Depends(get_db)):
     jobs = JobService.get_jobs(db, status)
-    return [
-        {
-            "id": j.id,
-            "title": j.title,
-            "company": j.company,
-            "location": j.location,
-            "description": j.description,
-            "job_url": j.job_url,
-            "site": j.site,
-            "status": j.status,
-            "created_at": j.created_at.isoformat()
-        }
-        for j in jobs
-    ]
+    return jobs
 
 @router.patch("/{job_id}/status")
 def update_job_status(job_id: int, status: str, db: Session = Depends(get_db)):
