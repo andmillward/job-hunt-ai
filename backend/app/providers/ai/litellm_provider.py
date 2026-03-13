@@ -49,6 +49,25 @@ class LiteLLMProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: LiteLLM Error: {str(e)}")
             raise e
 
+    def complete(self, prompt: str, model: str, api_key: str) -> str:
+        logger.info(f">>> PROVIDER: LiteLLM completing with {model}")
+        
+        if "gemini" in model.lower():
+            os.environ["GEMINI_API_KEY"] = api_key
+        elif "gpt" in model.lower():
+            os.environ["OPENAI_API_KEY"] = api_key
+            
+        try:
+            response = completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                api_key=api_key
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f">>> PROVIDER: LiteLLM Complete Error: {str(e)}")
+            raise e
+
     def list_models(self, api_key: str) -> List[dict]:
         # LiteLLM doesn't have a universal list_models, usually depends on provider
         # For now, return a basic list or empty

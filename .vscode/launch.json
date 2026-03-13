@@ -5,15 +5,11 @@
       "type": "debugpy",
       "name": "Backend: FastAPI (Local Dev)",
       "request": "launch",
-      "module": "uvicorn",
-      "args": [
-        "app.main:app",
-        "--reload",
-        "--port",
-        "8080"
-      ],
+      "program": "${workspaceFolder}/backend/run.py",
       "cwd": "${workspaceFolder}/backend",
-      "jinja": true,
+      "env": {
+        "PYTHONPATH": "."
+      },
       "preLaunchTask": "Backend: Install Requirements"
     },
     {

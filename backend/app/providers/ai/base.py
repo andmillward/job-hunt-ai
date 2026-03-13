@@ -8,6 +8,11 @@ class BaseAIProvider(ABC):
         pass
 
     @abstractmethod
+    def complete(self, prompt: str, model: str, api_key: str) -> str:
+        """Get a text completion from the AI."""
+        pass
+
+    @abstractmethod
     def list_models(self, api_key: str) -> List[dict]:
         """List available models for this provider."""
         pass

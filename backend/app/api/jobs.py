@@ -10,7 +10,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 @router.post("/search")
 async def search_jobs(request: JobSearchRequest, db: Session = Depends(get_db)):
     try:
-        result = JobService.search_and_store_jobs(
+        result = await JobService.search_and_store_jobs(
             db, request.keywords, request.location, request.results_wanted, request.site_name
         )
         return {"status": "success", **result}

@@ -42,6 +42,19 @@ class GeminiNativeProvider(BaseAIProvider):
             logger.error(f">>> PROVIDER: GeminiNative Error: {str(e)}")
             raise e
 
+    def complete(self, prompt: str, model: str, api_key: str) -> str:
+        logger.info(f">>> PROVIDER: GeminiNative completing with {model}")
+        try:
+            genai.configure(api_key=api_key)
+            native_name = model.split("/")[-1] if "/" in model else model
+            native_name = native_name.replace("-latest", "")
+            gemini_model = genai.GenerativeModel(native_name)
+            response = gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f">>> PROVIDER: GeminiNative Complete Error: {str(e)}")
+            raise e
+
     def list_models(self, api_key: str) -> List[dict]:
         try:
             genai.configure(api_key=api_key)

@@ -36,7 +36,7 @@ interface Toast {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState('resume')
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'resume')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [resumes, setResumes] = useState<Resume[]>([])
@@ -62,6 +62,10 @@ function App() {
     setToast({ message, type })
     setTimeout(() => setToast(null), 5000)
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem('activeTab', activeTab)
+  }, [activeTab])
 
   useEffect(() => {
     if (isDarkMode) {
@@ -287,8 +291,8 @@ function App() {
                 {/* Left Column: Upload & History */}
                 <div className="lg:col-span-4 space-y-6">
                   <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
-                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">New Upload</h3>
-                    <div className={`relative border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all ${file ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500/50 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">New Upload</h3>
+                    <div className={`relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all ${file ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500/50 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}>
                       <input 
                         type="file" 
                         className="absolute inset-0 opacity-0 cursor-pointer" 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary
+from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary, Boolean
 from datetime import datetime
 from app.database import Base
 
@@ -31,4 +31,15 @@ class JobListing(Base):
     site = Column(String, nullable=True) # e.g., linkedin, indeed
     posted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="new") # new, applied, rejected, interviewing
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="new") # new, applied, rejected, interviewing, closed
+
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    keywords = Column(String, nullable=False)
+    location = Column(String, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    last_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

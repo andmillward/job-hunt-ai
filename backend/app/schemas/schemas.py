@@ -36,3 +36,33 @@ class JobListingResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class SavedSearchResponse(BaseModel):
+    id: int
+    keywords: str
+    location: Optional[str]
+    is_verified: bool
+    last_run_at: Optional[str]
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+class SearchNetRequest(BaseModel):
+    dream_role: str
+    location: Optional[str] = None
+
+class SavedSearchResponse(BaseModel):
+    id: int
+    keywords: str
+    location: Optional[str]
+    is_verified: bool
+    last_run_at: Optional[str]
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+class SearchNetRequest(BaseModel):
+    dream_role: str
+    location: Optional[str] = None
