@@ -89,12 +89,12 @@ const JobCard: React.FC<JobCardProps> = ({ job, duplicates, isExpanded, onToggle
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2"><Info className="w-3 h-3" /> AI Insight</p>
                 <p className="text-sm font-medium text-slate-700 dark:text-slate-300 italic">{alignment.ai_insight}</p>
               </div>
-              <div className="flex flex-col gap-2 border-l border-slate-200 dark:border-slate-700 pl-4 min-w-[100px]">
-                <div className="flex justify-between items-center text-[9px] font-black uppercase">
+              <div className="flex flex-col gap-2 border-l border-slate-200 dark:border-slate-700 pl-4 min-w-[120px]">
+                <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-tight">
                   <span className="text-slate-400">Skills</span>
                   <span className="text-indigo-500">{alignment.score_skills}/10</span>
                 </div>
-                <div className="flex justify-between items-center text-[9px] font-black uppercase">
+                <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-tight">
                   <span className="text-slate-400">Culture</span>
                   <span className="text-indigo-500">{alignment.score_culture}/10</span>
                 </div>

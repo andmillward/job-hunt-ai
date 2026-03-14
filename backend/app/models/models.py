@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, LargeBinary, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime
 from app.database import Base
@@ -57,18 +57,18 @@ class JobListing(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
-    company = Column(String, nullable=False)
+    company = Column(String, nullable=False, index=True)
     location = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     job_url = Column(String, nullable=True, unique=True)
     site = Column(String, nullable=True) # e.g., linkedin, indeed
     posted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     last_seen_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="new") # new, applied, rejected, interviewing, closed, duplicate
+    status = Column(String, default="new", index=True) # new, applied, rejected, interviewing, closed, duplicate
 
     # MIL-45: Support grouping
-    parent_id = Column(Integer, ForeignKey("job_listings.id", ondelete="SET NULL"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("job_listings.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Relationships
     alignments = relationship("JobAlignment", back_populates="job", cascade="all, delete-orphan")
@@ -79,7 +79,7 @@ class SavedSearch(Base):
     __tablename__ = "saved_searches"
 
     id = Column(Integer, primary_key=True, index=True)
-    resume_id = Column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=True)
+    resume_id = Column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=True, index=True)
     keywords = Column(String, nullable=False)
     location = Column(String, nullable=True)
     
@@ -113,6 +113,11 @@ class JobAlignment(Base):
     # Relationships
     job = relationship("JobListing", back_populates="alignments")
     resume = relationship("Resume", back_populates="alignments")
+
+    # Optimization Index
+    __table_args__ = (
+        Index('idx_resume_job_alignment', 'resume_id', 'job_id'),
+    )
 
 class CompanyIntel(Base):
     __tablename__ = "company_intel"

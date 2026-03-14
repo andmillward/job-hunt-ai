@@ -12,35 +12,37 @@ from ..providers.search.jobcatcher_provider import JobCatcherProvider
 from .settings_service import SettingsService
 from .resume_service import ResumeService
 from ..schemas.schemas import SavedSearchCreateRequest, SavedSearchUpdateRequest
-from typing import List, Optional
+from typing import List, Optional, Tuple, Any
 
 logger = logging.getLogger("uvicorn")
 
 class JobService:
+    """
+    Orchestrates job discovery, alignment scoring, and intelligence synthesis.
+    """
+
+    # --- HELPER UTILITIES ---
+
     @staticmethod
     def _clean_json_response(text: str) -> str:
-        """Extracts JSON content from potentially markdown-wrapped AI responses."""
+        """Surgically extracts JSON content from AI markdown or conversational preamble."""
         if not text:
             return "[]"
         cleaned = text.strip()
         
-        # Handle triple backticks
         if "```json" in cleaned:
             cleaned = cleaned.split("```json")[1].split("```")[0].strip()
         elif "```" in cleaned:
             cleaned = cleaned.split("```")[1].split("```")[0].strip()
             
-        # Remove any non-JSON prefix/suffix (common with conversational models)
         start_idx = cleaned.find('[')
         dict_start = cleaned.find('{')
         
-        # If [ comes first or there is no {
         if start_idx != -1 and (dict_start == -1 or start_idx < dict_start):
             end_idx = cleaned.rfind(']')
             if end_idx != -1:
                 return cleaned[start_idx:end_idx+1]
         
-        # If { comes first or there is no [
         if dict_start != -1:
             end_idx = cleaned.rfind('}')
             if end_idx != -1:
@@ -49,7 +51,8 @@ class JobService:
         return cleaned
 
     @staticmethod
-    def _get_ai_credentials(db: Session):
+    def _get_ai_credentials(db: Session) -> Tuple[str, str, str]:
+        """Resolves the active model and corresponding API key/URL context."""
         model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
         gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -63,17 +66,19 @@ class JobService:
 
     @staticmethod
     def get_providers(db: Session):
+        """Returns initialized search providers based on configuration."""
         providers = [
             ("jobspy", JobSpyProvider()),
             ("jobcatcher", JobCatcherProvider())
         ]
         
-        # Check if JSearch is configured
         jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
         if jsearch_key:
             providers.append(("jsearch", JSearchProvider()))
             
         return providers
+
+    # --- CORE SEARCH ENGINE ---
 
     @classmethod
     async def search_and_store_jobs(
@@ -85,104 +90,116 @@ class JobService:
         site_name: List[str] = ["linkedin", "indeed", "glassdoor", "zip_recruiter"],
         **kwargs
     ):
+        """Executes parallel searches across providers and persists results."""
         providers = cls.get_providers(db)
-        total_found = 0
-        total_new = 0
-        
         jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
 
+        # Step 1: Execute all searches in parallel
+        search_tasks = []
         for name, provider in providers:
-            try:
-                # Pass provider-specific kwargs
-                provider_kwargs = {**kwargs}
-                if name == "jobspy":
-                    provider_kwargs["site_name"] = site_name
-                elif name == "jsearch":
-                    provider_kwargs["api_key"] = jsearch_key
+            provider_kwargs = {**kwargs}
+            if name == "jobspy":
+                provider_kwargs["site_name"] = site_name
+            elif name == "jsearch":
+                provider_kwargs["api_key"] = jsearch_key
+            
+            search_tasks.append(cls._safe_provider_search(provider, name, keywords, location, results_wanted, **provider_kwargs))
 
-                # Handle both sync and async providers
-                if asyncio.iscoroutinefunction(provider.search_jobs):
-                    standardized_jobs = await provider.search_jobs(
-                        keywords=keywords,
-                        location=location,
-                        results_wanted=results_wanted,
-                        **provider_kwargs
-                    )
-                else:
-                    standardized_jobs = provider.search_jobs(
-                        keywords=keywords,
-                        location=location,
-                        results_wanted=results_wanted,
-                        **provider_kwargs
-                    )
-                
-                total_found += len(standardized_jobs)
-                
-                for job in standardized_jobs:
-                    if not job.get('job_url'):
-                        continue
-                        
-                    existing = db.query(models.JobListing).filter(models.JobListing.job_url == job['job_url']).first()
-                    if not existing:
-                        db_job = models.JobListing(
-                            title=job['title'],
-                            company=job['company'],
-                            location=job['location'],
-                            description=job['description'],
-                            job_url=job['job_url'],
-                            site=job['site'] or name,
-                            posted_at=job['posted_at']
-                        )
-                        db.add(db_job)
-                        total_new += 1
-                    else:
-                        # Update last seen timestamp
-                        existing.last_seen_at = datetime.utcnow()
-                        if existing.status == "closed":
-                            existing.status = "new"
-                
-                db.commit()
-            except Exception as e:
-                logger.error(f">>> SERVICE: Job Search Failure for {name}: {str(e)}")
+        provider_results = await asyncio.gather(*search_tasks)
         
-        # Automatically trigger deduplication for new items
-        await cls.deduplicate_jobs(db)
+        # Step 2: Consolidate and persist results
+        total_found = 0
+        total_new = 0
+        new_job_ids = []
+        
+        for name, standardized_jobs in provider_results:
+            total_found += len(standardized_jobs)
+            for job in standardized_jobs:
+                if not job.get('job_url'): continue
+                
+                db_job = cls._persist_single_job(db, job, name)
+                if db_job:
+                    total_new += 1
+                    new_job_ids.append(db_job.id)
+        
+        db.commit()
+        
+        # Step 3: Cleanup (Incremental Deduplication)
+        if total_new > 0:
+            await cls.deduplicate_jobs(db, target_job_ids=new_job_ids)
         
         return {"found": total_found, "new": total_new}
 
+    @staticmethod
+    async def _safe_provider_search(provider: Any, name: str, keywords: str, location: str, results_wanted: int, **kwargs) -> Tuple[str, List[dict]]:
+        """Isolated provider search with localized error handling."""
+        try:
+            if asyncio.iscoroutinefunction(provider.search_jobs):
+                jobs = await provider.search_jobs(keywords=keywords, location=location, results_wanted=results_wanted, **kwargs)
+            else:
+                jobs = provider.search_jobs(keywords=keywords, location=location, results_wanted=results_wanted, **kwargs)
+            return name, jobs
+        except Exception as e:
+            logger.error(f">>> SERVICE: Provider {name} failed: {str(e)}")
+            return name, []
+
+    @staticmethod
+    def _persist_single_job(db: Session, job: dict, source_name: str) -> Optional[models.JobListing]:
+        """Logic for updating existing or creating new job records."""
+        existing = db.query(models.JobListing).filter(models.JobListing.job_url == job['job_url']).first()
+        if not existing:
+            db_job = models.JobListing(
+                title=job['title'],
+                company=job['company'],
+                location=job['location'],
+                description=job['description'],
+                job_url=job['job_url'],
+                site=job['site'] or source_name,
+                posted_at=job['posted_at']
+            )
+            db.add(db_job)
+            return db_job
+        else:
+            existing.last_seen_at = datetime.utcnow()
+            if existing.status == "closed":
+                existing.status = "new"
+            return None
+
+    # --- INTELLIGENCE SYNTHESIS ---
+
     @classmethod
     async def synthesize_company_intel(cls, db: Session, company_names: List[str]):
-        if not company_names:
-            return
+        """Batches and parallelizes AI intelligence gathering for companies."""
+        if not company_names: return
 
-        logger.info(f">>> SERVICE: Synthesizing intel for {len(company_names)} companies (batched)")
-        
+        logger.info(f">>> SERVICE: Orchestrating intel for {len(company_names)} companies")
         model, api_key, ollama_url = cls._get_ai_credentials(db)
         provider = ResumeService.get_provider(db)
         
-        # Validation for non-ollama
         if not api_key and "ollama/" not in model.lower():
-            logger.warning(">>> SERVICE: Skipping company intel synthesis - API Key missing")
+            logger.warning(">>> SERVICE: Skipping intel - Missing AI credentials")
             return
 
-        # Process in batches of 5 for deep sentiment analysis to avoid overloading context/rate limits
+        # Parallelize batches with a semaphore to respect AI rate limits
+        semaphore = asyncio.Semaphore(3) 
         batch_size = 5
+        intel_tasks = []
+        
         for i in range(0, len(company_names), batch_size):
             batch = company_names[i:i + batch_size]
-            
+            intel_tasks.append(cls._synthesize_batch(db, provider, batch, model, api_key, ollama_url, semaphore))
+
+        await asyncio.gather(*intel_tasks)
+
+    @classmethod
+    async def _synthesize_batch(cls, db: Session, provider: Any, batch: List[str], model: str, api_key: str, ollama_url: str, semaphore: asyncio.Semaphore):
+        """Processes a single batch of companies through the AI provider."""
+        async with semaphore:
             prompt = f"""
-            Provide company intelligence for the following companies. 
-            For each, research (or use internal knowledge) to provide:
-            1. A brief bio/synopsis.
-            2. Estimated Glassdoor rating.
-            3. Recent Reddit sentiment summary (what employees/users are saying).
-            4. Twitter (X) vibe (is the company trending, controversial, or stable).
-            5. An overall sentiment score from 1-10 (10 being best place to work).
-            
-            Companies: {", ".join(batch)}
+            Provide company intelligence for: {", ".join(batch)}
             
             Return ONLY a JSON array of objects. Each object MUST have:
-            - name: string (exactly as provided)
+            - name: string (exact match)
             - bio: string (max 250 chars)
             - glassdoor_score: string (e.g. "4.2/5")
             - reddit_sentiment: string (max 200 chars)
@@ -195,58 +212,38 @@ class JobService:
                 cleaned_json = cls._clean_json_response(resp_raw)
                 intel_list = json.loads(cleaned_json)
                 
-                # Ensure it's a list
-                if isinstance(intel_list, dict):
-                    intel_list = [intel_list]
+                if isinstance(intel_list, dict): intel_list = [intel_list]
 
                 for intel in intel_list:
-                    if not isinstance(intel, dict): continue
-                    
-                    name = intel.get("name")
-                    if not name: continue
-                    
-                    # Update or Create
-                    db_intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == name).first()
-                    if not db_intel:
-                        db_intel = models.CompanyIntel(name=name)
-                        db.add(db_intel)
-                    
-                    db_intel.bio = intel.get("bio", "")
-                    db_intel.glassdoor_score = intel.get("glassdoor_score", "N/A")
-                    db_intel.reddit_sentiment = intel.get("reddit_sentiment", "")
-                    db_intel.twitter_sentiment = intel.get("twitter_sentiment", "")
-                    db_intel.overall_sentiment_score = intel.get("overall_sentiment_score", 5)
-                    db_intel.last_updated_at = datetime.utcnow()
-                    
+                    if not isinstance(intel, dict) or not intel.get("name"): continue
+                    cls._upsert_company_intel(db, intel)
+                
                 db.commit()
-                # Brief pause between batches if many to respect AI rate limits
-                if len(company_names) > batch_size:
-                    await asyncio.sleep(2)
             except Exception as e:
-                logger.error(f">>> SERVICE: Failed to synthesize batch {i}: {str(e)}")
+                logger.error(f">>> SERVICE: Intel batch failure: {str(e)}")
 
     @staticmethod
-    def get_jobs(db: Session, status: Optional[str] = None, resume_id: Optional[int] = None):
-        # Only return parent jobs (primary listings)
-        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
-        if status:
-            query = query.filter(models.JobListing.status == status)
-        return query.order_by(models.JobListing.created_at.desc()).all()
+    def _upsert_company_intel(db: Session, intel: dict):
+        """Updates or creates a company intelligence record."""
+        name = intel.get("name")
+        db_intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == name).first()
+        if not db_intel:
+            db_intel = models.CompanyIntel(name=name)
+            db.add(db_intel)
+        
+        db_intel.bio = intel.get("bio", "")
+        db_intel.glassdoor_score = intel.get("glassdoor_score", "N/A")
+        db_intel.reddit_sentiment = intel.get("reddit_sentiment", "")
+        db_intel.twitter_sentiment = intel.get("twitter_sentiment", "")
+        db_intel.overall_sentiment_score = intel.get("overall_sentiment_score", 5)
+        db_intel.last_updated_at = datetime.utcnow()
 
-    @staticmethod
-    def update_job_status(db: Session, job_id: int, status: str):
-        job = db.query(models.JobListing).filter(models.JobListing.id == job_id).first()
-        if not job:
-            return None
-        job.status = status
-        db.commit()
-        return job
-
-    # --- MIL-43: Search Net & Saved Searches ---
+    # --- SEARCH NET & RUNNERS ---
 
     @classmethod
     async def generate_search_net(cls, db: Session, dream_role: str, resume_id: Optional[int] = None) -> List[models.SavedSearch]:
-        logger.info(f">>> SERVICE: Generating resume-aware search net")
+        """Uses AI to generate a mesh of specific search queries based on profile."""
+        logger.info(f">>> SERVICE: Weaving search net for role: {dream_role}")
         
         resume = None
         if resume_id:
@@ -259,62 +256,48 @@ class JobService:
         provider = ResumeService.get_provider(db)
         
         if not api_key and "ollama/" not in model.lower():
-            raise Exception("AI API Key missing. Configure in Settings.")
+            raise Exception("AI API Key missing.")
 
-        resume_context = ""
-        if resume:
-            resume_context = f"""
-            Candidate Profile:
-            - Key Skills: {resume.parsed_skills}
-            - Experience Summary: {resume.parsed_experience[:500]}...
-            """
+        resume_context = f"Skills: {resume.parsed_skills}\nExperience: {resume.parsed_experience[:500]}" if resume else ""
 
         prompt = f"""
-        Given the following dream role description and the candidate's actual resume data, generate 5-10 specific search query configurations.
+        Generate 5-10 job search queries for: {dream_role}
+        Context: {resume_context}
         
-        {resume_context}
-        
-        User Preference: {dream_role}
-        
-        Return ONLY a JSON array of objects. Each object MUST have:
-        - keywords: string (e.g. "Senior Kotlin Developer Fintech")
-        - location: string or null (e.g. "USA", "London", "Remote")
-        - min_salary: integer or null
-        - remote_only: boolean
-        - job_type: string or null (one of: full_time, contract, part_time, internship)
-        - hours_old: integer (default 72)
+        Return ONLY a JSON array of objects:
+        - keywords: string
+        - location: string/null
+        - min_salary: int/null
+        - remote_only: bool
+        - job_type: string/null (full_time, contract, part_time, internship)
+        - hours_old: int (default 72)
         """
         
         try:
-            response_text_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
-            cleaned_json = cls._clean_json_response(response_text_raw)
-            search_configs = json.loads(cleaned_json)
+            resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+            cleaned_json = cls._clean_json_response(resp_raw)
+            configs = json.loads(cleaned_json)
             
-            if isinstance(search_configs, dict):
-                search_configs = [search_configs]
+            if isinstance(configs, dict): configs = [configs]
 
             saved_results = []
-            for cfg in search_configs:
-                if not isinstance(cfg, dict): continue
-                
-                kw = cfg.get("keywords")
-                if not kw: continue
+            for cfg in configs:
+                if not isinstance(cfg, dict) or not cfg.get("keywords"): continue
                 
                 existing = db.query(models.SavedSearch).filter(
-                    models.SavedSearch.keywords == kw, 
+                    models.SavedSearch.keywords == cfg.get("keywords"), 
                     models.SavedSearch.resume_id == resume_id
                 ).first()
                 
                 if not existing:
                     new_search = models.SavedSearch(
-                        keywords=kw, 
+                        resume_id=resume_id,
+                        keywords=cfg.get("keywords"), 
                         location=cfg.get("location"), 
                         min_salary=cfg.get("min_salary"),
                         remote_only=cfg.get("remote_only", False),
                         job_type=cfg.get("job_type"),
-                        hours_old=cfg.get("hours_old", 72),
-                        is_verified=False, 
-                        resume_id=resume_id
+                        hours_old=cfg.get("hours_old", 72)
                     )
                     db.add(new_search)
                     db.commit()
@@ -325,28 +308,206 @@ class JobService:
             
             return saved_results
         except Exception as e:
-            logger.error(f">>> SERVICE: Search Net Generation Failure: {str(e)}")
+            logger.error(f">>> SERVICE: Search net generation failure: {str(e)}")
             raise e
+
+    @classmethod
+    async def run_verified_searches(cls, db: Session, resume_id: Optional[int] = None):
+        """Executes all verified queries in the net."""
+        query = db.query(models.SavedSearch).filter(models.SavedSearch.is_verified == True)
+        if resume_id: query = query.filter(models.SavedSearch.resume_id == resume_id)
+        
+        verified_searches = query.all()
+        logger.info(f">>> SERVICE: Deploying net with {len(verified_searches)} queries")
+        
+        total_found = 0
+        total_new = 0
+        start_time = datetime.utcnow()
+        
+        # We run these in sequence to prevent IP-banning from search engines (Indeed/LinkedIn are sensitive)
+        for search in verified_searches:
+            result = await cls.search_and_store_jobs(
+                db, search.keywords, search.location, 
+                min_salary=search.min_salary,
+                remote_only=search.remote_only,
+                job_type=search.job_type,
+                hours_old=search.hours_old
+            )
+            total_found += result["found"]
+            total_new += result["new"]
+            search.last_run_at = datetime.utcnow()
+            db.commit()
+            await asyncio.sleep(2) 
+            
+        # Cleanup stale jobs (Detect closed listings)
+        stale_threshold = start_time - timedelta(minutes=5)
+        stale_count = db.query(models.JobListing).filter(
+            models.JobListing.status == "new",
+            models.JobListing.last_seen_at < stale_threshold
+        ).update({models.JobListing.status: "closed"})
+        db.commit()
+            
+        return {"found": total_found, "new": total_new, "closed": stale_count}
+
+    # --- RANKING ENGINE ---
+
+    @classmethod
+    async def rank_jobs(cls, db: Session, resume_id: int, job_ids: Optional[List[int]] = None, limit: Optional[int] = 20):
+        """Analyzes and scores job alignment using profile and company intel."""
+        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+        if not resume: raise Exception("Resume not found")
+
+        # Select target jobs
+        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
+        if job_ids:
+            query = query.filter(models.JobListing.id.in_(job_ids))
+        else:
+            already_ranked = db.query(models.JobAlignment.job_id).filter(models.JobAlignment.resume_id == resume_id).all()
+            query = query.filter(~models.JobListing.id.in_([r[0] for r in already_ranked]))
+
+        if limit and limit > 0: query = query.limit(limit)
+            
+        jobs_to_rank = query.all() 
+        if not jobs_to_rank: return {"status": "complete", "ranked_count": 0}
+
+        # Step 1: Prepare Intelligence
+        companies = list(set([j.company for j in jobs_to_rank]))
+        await cls.synthesize_company_intel(db, companies)
+
+        # Step 2: Scoring
+        logger.info(f">>> SERVICE: Scoring alignment for {len(jobs_to_rank)} listings")
+        model, api_key, ollama_url = cls._get_ai_credentials(db)
+        provider = ResumeService.get_provider(db)
+        
+        jobs_payload = []
+        for j in jobs_to_rank:
+            intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == j.company).first()
+            intel_ctx = f"Vibe: {intel.overall_sentiment_score}/10. Glassdoor: {intel.glassdoor_score}. Reddit: {intel.reddit_sentiment}" if intel else ""
+            
+            jobs_payload.append({
+                "id": j.id,
+                "title": j.title,
+                "company": j.company,
+                "description": j.description[:1500] if j.description else "",
+                "company_context": intel_ctx
+            })
+
+        prompt = f"""
+        Score these jobs against the profile:
+        Skills: {resume.parsed_skills}
+        Dream Role: {resume.dream_role}
+        
+        Jobs: {json.dumps(jobs_payload)}
+        
+        Return ONLY a JSON array of objects:
+        - id: int
+        - score_skills: int (1-10)
+        - score_culture: int (1-10)
+        - score_overall: int (1-10)
+        - ai_insight: string (max 150 chars)
+        """
+        
+        try:
+            resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+            results = json.loads(cls._clean_json_response(resp_raw))
+            if isinstance(results, dict): results = [results]
+
+            count = 0
+            for res in results:
+                alignment = models.JobAlignment(
+                    job_id=res.get("id"),
+                    resume_id=resume_id,
+                    score_skills=res.get("score_skills", 0),
+                    score_culture=res.get("score_culture", 0),
+                    score_overall=res.get("score_overall", 0),
+                    ai_insight=res.get("ai_insight", "")
+                )
+                db.add(alignment)
+                count += 1
+            
+            db.commit()
+            return {"status": "success", "ranked_count": count}
+        except Exception as e:
+            logger.error(f">>> SERVICE: Ranking failure: {str(e)}")
+            raise e
+
+    # --- DEDUPLICATION ---
+
+    @classmethod
+    async def deduplicate_jobs(cls, db: Session, target_job_ids: Optional[List[int]] = None):
+        """
+        Incremental AI deduplication.
+        Focuses only on companies that have 'fresh' jobs to reduce processing time.
+        """
+        logger.info(">>> SERVICE: Orchestrating incremental deduplication")
+        
+        # Step 1: Identify companies needing inspection
+        if target_job_ids:
+            companies_to_check = db.query(models.JobListing.company).filter(models.JobListing.id.in_(target_job_ids)).distinct().all()
+        else:
+            # Fallback to full check if no targets provided (safety)
+            companies_to_check = db.query(models.JobListing.company).filter(models.JobListing.parent_id == None, models.JobListing.status == "new").distinct().all()
+            
+        company_names = [c[0] for c in companies_to_check]
+        if not company_names: return {"status": "complete", "deduped_count": 0}
+
+        # Step 2: Batch process by company
+        deduped_count = 0
+        model, api_key, ollama_url = cls._get_ai_credentials(db)
+        provider = ResumeService.get_provider(db)
+
+        for company in company_names:
+            # For each company, fetch all primary candidates
+            group = db.query(models.JobListing).filter(
+                models.JobListing.company == company,
+                models.JobListing.parent_id == None,
+                models.JobListing.status != "duplicate"
+            ).all()
+            
+            if len(group) < 2: continue
+            
+            prompt = f"""
+            Identify duplicate job listings for '{company}'.
+            Jobs: {json.dumps([{'id': j.id, 'title': j.title} for j in group])}
+            
+            Return ONLY a JSON array of arrays (grouped IDs). The first ID in each sub-array is the PRIMARY.
+            """
+            
+            try:
+                resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
+                dup_groups = json.loads(cls._clean_json_response(resp_raw))
+                
+                for dg in dup_groups:
+                    if not isinstance(dg, list) or len(dg) < 2: continue
+                    primary_id = dg[0]
+                    for dup_id in dg[1:]:
+                        dup_job = db.query(models.JobListing).filter(models.JobListing.id == dup_id).first()
+                        if dup_job:
+                            dup_job.parent_id = primary_id
+                            dup_job.status = "duplicate"
+                            deduped_count += 1
+                db.commit()
+            except: continue
+                
+        return {"status": "success", "deduped_count": deduped_count}
+
+    # --- DATA ACCESS ---
+
+    @staticmethod
+    def get_jobs(db: Session, status: Optional[str] = None):
+        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
+        if status: query = query.filter(models.JobListing.status == status)
+        return query.order_by(models.JobListing.created_at.desc()).all()
 
     @staticmethod
     def get_saved_searches(db: Session, resume_id: Optional[int] = None):
         query = db.query(models.SavedSearch)
-        if resume_id:
-            query = query.filter(models.SavedSearch.resume_id == resume_id)
+        if resume_id: query = query.filter(models.SavedSearch.resume_id == resume_id)
         return query.order_by(models.SavedSearch.is_verified.desc(), models.SavedSearch.created_at.desc()).all()
 
     @staticmethod
     def create_saved_search(db: Session, request: SavedSearchCreateRequest):
-        new_search = models.SavedSearch(
-            resume_id=request.resume_id,
-            keywords=request.keywords,
-            location=request.location,
-            min_salary=request.min_salary,
-            remote_only=request.remote_only,
-            job_type=request.job_type,
-            hours_old=request.hours_old,
-            is_verified=request.is_verified
-        )
+        new_search = models.SavedSearch(**request.model_dump())
         db.add(new_search)
         db.commit()
         db.refresh(new_search)
@@ -355,24 +516,9 @@ class JobService:
     @staticmethod
     def update_saved_search(db: Session, search_id: int, request: SavedSearchUpdateRequest):
         search = db.query(models.SavedSearch).filter(models.SavedSearch.id == search_id).first()
-        if not search:
-            return None
-        
-        if request.keywords is not None:
-            search.keywords = request.keywords
-        if request.location is not None:
-            search.location = request.location
-        if request.min_salary is not None:
-            search.min_salary = request.min_salary
-        if request.remote_only is not None:
-            search.remote_only = request.remote_only
-        if request.job_type is not None:
-            search.job_type = request.job_type
-        if request.hours_old is not None:
-            search.hours_old = request.hours_old
-        if request.is_verified is not None:
-            search.is_verified = request.is_verified
-            
+        if not search: return None
+        for key, value in request.model_dump(exclude_unset=True).items():
+            setattr(search, key, value)
         db.commit()
         db.refresh(search)
         return search
@@ -388,237 +534,6 @@ class JobService:
 
     @staticmethod
     def clear_unverified_searches(db: Session, resume_id: int):
-        db.query(models.SavedSearch).filter(
-            models.SavedSearch.resume_id == resume_id,
-            models.SavedSearch.is_verified == False
-        ).delete()
+        db.query(models.SavedSearch).filter(models.SavedSearch.resume_id == resume_id, models.SavedSearch.is_verified == False).delete()
         db.commit()
         return True
-
-    @classmethod
-    async def run_verified_searches(cls, db: Session, resume_id: Optional[int] = None):
-        query = db.query(models.SavedSearch).filter(models.SavedSearch.is_verified == True)
-        if resume_id:
-            query = query.filter(models.SavedSearch.resume_id == resume_id)
-        
-        verified_searches = query.all()
-        
-        # Discourage running more than once a day logic
-        now = datetime.utcnow()
-        day_ago = now - timedelta(days=1)
-        
-        recent_run = db.query(models.SavedSearch).filter(
-            models.SavedSearch.resume_id == resume_id,
-            models.SavedSearch.last_run_at > day_ago
-        ).first()
-        
-        logger.info(f">>> SERVICE: Running {len(verified_searches)} verified searches")
-        
-        total_found = 0
-        total_new = 0
-        start_time = datetime.utcnow()
-        
-        for search in verified_searches:
-            levers = {
-                "min_salary": search.min_salary,
-                "remote_only": search.remote_only,
-                "job_type": search.job_type,
-                "hours_old": search.hours_old
-            }
-            
-            result = await cls.search_and_store_jobs(db, search.keywords, search.location, **levers)
-            total_found += result["found"]
-            total_new += result["new"]
-            search.last_run_at = datetime.utcnow()
-            db.commit()
-            await asyncio.sleep(2) 
-            
-        # MIL-45: Staleness Logic
-        stale_threshold = start_time - timedelta(minutes=5)
-        stale_count = db.query(models.JobListing).filter(
-            models.JobListing.status == "new",
-            models.JobListing.last_seen_at < stale_threshold
-        ).update({models.JobListing.status: "closed"})
-        db.commit()
-            
-        return {
-            "found": total_found, 
-            "new": total_new, 
-            "closed": stale_count,
-            "was_recent": recent_run is not None,
-            "last_run": recent_run.last_run_at.isoformat() if recent_run else None
-        }
-
-    # --- MIL-44: Ranking Engine ---
-
-    @classmethod
-    async def rank_jobs(cls, db: Session, resume_id: int, job_ids: Optional[List[int]] = None, limit: Optional[int] = 20):
-        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
-        if not resume:
-            raise Exception("Resume profile not found")
-
-        # Get jobs to rank
-        query = db.query(models.JobListing).filter(models.JobListing.parent_id == None)
-        if job_ids:
-            query = query.filter(models.JobListing.id.in_(job_ids))
-        else:
-            already_ranked = db.query(models.JobAlignment.job_id).filter(models.JobAlignment.resume_id == resume_id).all()
-            already_ranked_ids = [r[0] for r in already_ranked]
-            query = query.filter(~models.JobListing.id.in_(already_ranked_ids))
-
-        if limit and limit > 0:
-            query = query.limit(limit)
-            
-        jobs_to_rank = query.all() 
-        if not jobs_to_rank:
-            return {"status": "complete", "ranked_count": 0}
-
-        # --- STEP 1: Ensure Company Intel exists for this batch ---
-        companies_needed = list(set([j.company for j in jobs_to_rank]))
-        existing_intel = db.query(models.CompanyIntel.name).filter(models.CompanyIntel.name.in_(companies_needed)).all()
-        existing_names = [r[0] for r in existing_intel]
-        missing_names = [c for c in companies_needed if c not in existing_names]
-        
-        if missing_names:
-            logger.info(f">>> SERVICE: Missing intel for {len(missing_names)} companies in ranking batch. Fetching...")
-            await cls.synthesize_company_intel(db, missing_names)
-
-        # --- STEP 2: Scored the batch with Company Context ---
-        logger.info(f">>> SERVICE: Ranking batch of {len(jobs_to_rank)} jobs for resume {resume_id}")
-
-        model, api_key, ollama_url = cls._get_ai_credentials(db)
-        provider = ResumeService.get_provider(db)
-        
-        if not api_key and "ollama/" not in model.lower():
-            raise Exception("AI API Key missing.")
-
-        # Build context from resume
-        context = f"""
-        User Dream Role Preferences: {resume.dream_role}
-        User Technical Skills: {resume.parsed_skills}
-        """
-        
-        jobs_data = []
-        for j in jobs_to_rank:
-            # Attach intel if available for prompt context
-            intel = db.query(models.CompanyIntel).filter(models.CompanyIntel.name == j.company).first()
-            intel_context = ""
-            if intel:
-                intel_context = f"Company Sentiment: {intel.overall_sentiment_score}/10. Glassdoor: {intel.glassdoor_score}. Reddit info: {intel.reddit_sentiment}"
-
-            jobs_data.append({
-                "id": j.id,
-                "title": j.title,
-                "company": j.company,
-                "description": j.description[:1500] if j.description else "",
-                "company_context": intel_context
-            })
-
-        prompt = f"""
-        Score the following batch of job listings against the user profile.
-        Use the 'company_context' provided to influence the 'score_culture' and 'score_overall'.
-        
-        {context}
-        
-        Job Listings to Score:
-        {json.dumps(jobs_data, indent=2)}
-        
-        Return ONLY a JSON array of objects. Each object MUST include:
-        - id: the integer ID of the job from the input list
-        - score_skills: integer (1-10)
-        - score_culture: integer (1-10, based on benefits/paternity/PTO/remote preferences AND the provided company context)
-        - score_overall: integer (1-10)
-        - ai_insight: string (max 150 chars, specific reason for alignment including company vibe if relevant)
-        """
-        
-        try:
-            resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
-            cleaned_json = cls._clean_json_response(resp_raw)
-            logger.info(f">>> SERVICE: AI returned {len(cleaned_json)} chars of JSON for ranking")
-            results_list = json.loads(cleaned_json)
-            
-            if isinstance(results_list, dict):
-                results_list = [results_list]
-
-            saved_count = 0
-            for res in results_list:
-                if not isinstance(res, dict): continue
-                
-                job_id = res.get("id")
-                if not job_id: continue
-                
-                alignment = models.JobAlignment(
-                    job_id=job_id,
-                    resume_id=resume_id,
-                    score_skills=res.get("score_skills", 0),
-                    score_culture=res.get("score_culture", 0),
-                    score_overall=res.get("score_overall", 0),
-                    ai_insight=res.get("ai_insight", "")
-                )
-                db.add(alignment)
-                saved_count += 1
-            
-            db.commit()
-            logger.info(f">>> SERVICE: Successfully persisted {saved_count} alignments for resume {resume_id}")
-            return {"status": "success", "ranked_count": saved_count}
-            
-        except Exception as e:
-            logger.error(f">>> SERVICE: Batch Ranking Failure: {str(e)}")
-            raise e
-
-    # --- MIL-45: Deduplication ---
-
-    @classmethod
-    async def deduplicate_jobs(cls, db: Session):
-        logger.info(">>> SERVICE: Running AI Deduplication")
-        jobs = db.query(models.JobListing).filter(models.JobListing.parent_id == None, models.JobListing.status != "duplicate").all()
-        
-        company_groups = {}
-        for job in jobs:
-            if job.company not in company_groups:
-                company_groups[job.company] = []
-            company_groups[job.company].append(job)
-            
-        deduped_count = 0
-        
-        for company, group in company_groups.items():
-            if len(group) < 2: continue
-            
-            model, api_key, ollama_url = cls._get_ai_credentials(db)
-            provider = ResumeService.get_provider(db)
-            
-            if not api_key and "ollama/" not in model.lower(): continue
-            
-            group_data = [{"id": j.id, "title": j.title} for j in group]
-            
-            prompt = f"""
-            Identify which of the following job titles from company '{company}' are effectively the same job listing.
-            
-            Jobs:
-            {json.dumps(group_data, indent=2)}
-            
-            Return ONLY a JSON array of arrays. Each inner array is a group of IDs that are duplicates.
-            The FIRST ID in each inner array will be considered the 'Primary' listing.
-            """
-            
-            try:
-                resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
-                cleaned_json = cls._clean_json_response(resp_raw)
-                duplicate_groups = json.loads(cleaned_json)
-                
-                if not isinstance(duplicate_groups, list): continue
-
-                for dg in duplicate_groups:
-                    if not isinstance(dg, list) or len(dg) < 2: continue
-                    primary_id = dg[0]
-                    for dup_id in dg[1:]:
-                        dup_job = db.query(models.JobListing).filter(models.JobListing.id == dup_id).first()
-                        if dup_job:
-                            dup_job.parent_id = primary_id
-                            dup_job.status = "duplicate"
-                            deduped_count += 1
-                db.commit()
-            except Exception as e:
-                logger.error(f">>> SERVICE: Deduplication batch failed: {str(e)}")
-                
-        return {"status": "success", "deduped_count": deduped_count}
