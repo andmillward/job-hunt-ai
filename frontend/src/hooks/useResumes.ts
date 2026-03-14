@@ -57,6 +57,20 @@ export const useResumes = (showToast: any) => {
     }
   }
 
+  const updateResume = async (id: number, data: any) => {
+    try {
+      const response = await resumeService.updateResume(id, data)
+      await fetchResumes()
+      if (selectedResume?.id === id) {
+        setSelectedResume(response.data)
+      }
+      showToast('Profile updated successfully')
+    } catch (err) {
+      console.error(err)
+      showToast('Failed to update profile', 'error')
+    }
+  }
+
   const deleteResume = async (id: number) => {
     if (!confirm("Are you sure? All search data for this profile will be lost.")) return
     try {
@@ -79,6 +93,7 @@ export const useResumes = (showToast: any) => {
     uploading,
     fetchResumes,
     uploadResume,
+    updateResume,
     deleteResume
   }
 }

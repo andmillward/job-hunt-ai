@@ -108,11 +108,26 @@ export const useJobs = (selectedResume: any, showToast: any, goToRadar: any) => 
     }
   }
 
-  const toggleVerifySearch = async (id: number, currentStatus: boolean) => {
+  const addSavedSearch = async (search: any) => {
+    if (!selectedResume?.id) return
     try {
-      await jobService.toggleVerifySearch(id, !currentStatus)
-      setSavedSearches(prev => prev.map(s => s.id === id ? { ...s, is_verified: !currentStatus } : s))
-    } catch (err) { console.error(err) }
+      await jobService.createSavedSearch({ ...search, resume_id: selectedResume.id })
+      await fetchSavedSearches()
+      showToast("Search query added to net")
+    } catch (err) {
+      console.error(err)
+      showToast("Failed to add search", "error")
+    }
+  }
+
+  const updateSavedSearch = async (id: number, data: any) => {
+    try {
+      await jobService.updateSavedSearch(id, data)
+      setSavedSearches(prev => prev.map(s => s.id === id ? { ...s, ...data } : s))
+    } catch (err) {
+      console.error(err)
+      showToast("Failed to update search", "error")
+    }
   }
 
   const deleteSavedSearch = async (id: number) => {
@@ -162,7 +177,8 @@ export const useJobs = (selectedResume: any, showToast: any, goToRadar: any) => 
     handleGenerateNet,
     handleRunVerifiedNet,
     handleSingleSearch,
-    toggleVerifySearch,
+    addSavedSearch,
+    updateSavedSearch,
     deleteSavedSearch,
     clearUnverifiedSearches,
     primaryJobs,

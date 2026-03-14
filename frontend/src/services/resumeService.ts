@@ -8,6 +8,9 @@ export const resumeService = {
   uploadResume: (formData: FormData) => 
     apiClient.post<Resume>('/resumes', formData),
   
+  updateResume: (id: number, data: any) =>
+    apiClient.patch<Resume>(`/resumes/${id}`, data),
+
   deleteResume: (id: number) => 
     apiClient.delete(`/resumes/${id}`),
   

@@ -8,6 +8,7 @@ from .settings_service import SettingsService
 from ..providers.ai.gemini_provider import GeminiNativeProvider
 from ..providers.ai.litellm_provider import LiteLLMProvider
 from ..providers.ai.ollama_provider import OllamaProvider
+from ..schemas.schemas import ResumeUpdateRequest
 import os
 
 logger = logging.getLogger("uvicorn")
@@ -96,6 +97,27 @@ class ResumeService:
     @staticmethod
     def get_all_resumes(db: Session):
         return db.query(models.Resume).order_by(models.Resume.created_at.desc()).all()
+
+    @staticmethod
+    def update_resume(db: Session, resume_id: int, request: ResumeUpdateRequest):
+        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
+        if not resume:
+            return None
+        
+        if request.file_name is not None:
+            resume.file_name = request.file_name
+        if request.parsed_skills is not None:
+            resume.parsed_skills = request.parsed_skills
+        if request.parsed_experience is not None:
+            resume.parsed_experience = request.parsed_experience
+        if request.parsed_education is not None:
+            resume.parsed_education = request.parsed_education
+        if request.dream_role is not None:
+            resume.dream_role = request.dream_role
+            
+        db.commit()
+        db.refresh(resume)
+        return resume
 
     @staticmethod
     def delete_resume(db: Session, resume_id: int):

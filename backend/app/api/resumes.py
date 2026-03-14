@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.resume_service import ResumeService
 from ..services.automation_service import AutomationService
-from ..schemas.schemas import ResumeResponse
+from ..schemas.schemas import ResumeResponse, ResumeUpdateRequest
 from typing import List, Optional
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
@@ -17,6 +17,13 @@ async def upload_resume(file: UploadFile = File(...), db: Session = Depends(get_
 def get_resumes(db: Session = Depends(get_db)):
     resumes = ResumeService.get_all_resumes(db)
     return resumes
+
+@router.patch("/{resume_id}", response_model=ResumeResponse)
+def update_resume(resume_id: int, request: ResumeUpdateRequest, db: Session = Depends(get_db)):
+    resume = ResumeService.update_resume(db, resume_id, request)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return resume
 
 @router.delete("/{resume_id}")
 def delete_resume(resume_id: int, db: Session = Depends(get_db)):

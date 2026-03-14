@@ -11,6 +11,7 @@ from ..providers.search.jsearch_provider import JSearchProvider
 from ..providers.search.jobcatcher_provider import JobCatcherProvider
 from .settings_service import SettingsService
 from .resume_service import ResumeService
+from ..schemas.schemas import SavedSearchCreateRequest, SavedSearchUpdateRequest
 from typing import List, Optional
 
 logger = logging.getLogger("uvicorn")
@@ -335,12 +336,45 @@ class JobService:
         return query.order_by(models.SavedSearch.is_verified.desc(), models.SavedSearch.created_at.desc()).all()
 
     @staticmethod
-    def update_saved_search(db: Session, search_id: int, is_verified: bool):
+    def create_saved_search(db: Session, request: SavedSearchCreateRequest):
+        new_search = models.SavedSearch(
+            resume_id=request.resume_id,
+            keywords=request.keywords,
+            location=request.location,
+            min_salary=request.min_salary,
+            remote_only=request.remote_only,
+            job_type=request.job_type,
+            hours_old=request.hours_old,
+            is_verified=request.is_verified
+        )
+        db.add(new_search)
+        db.commit()
+        db.refresh(new_search)
+        return new_search
+
+    @staticmethod
+    def update_saved_search(db: Session, search_id: int, request: SavedSearchUpdateRequest):
         search = db.query(models.SavedSearch).filter(models.SavedSearch.id == search_id).first()
-        if search:
-            search.is_verified = is_verified
-            db.commit()
-            db.refresh(search)
+        if not search:
+            return None
+        
+        if request.keywords is not None:
+            search.keywords = request.keywords
+        if request.location is not None:
+            search.location = request.location
+        if request.min_salary is not None:
+            search.min_salary = request.min_salary
+        if request.remote_only is not None:
+            search.remote_only = request.remote_only
+        if request.job_type is not None:
+            search.job_type = request.job_type
+        if request.hours_old is not None:
+            search.hours_old = request.hours_old
+        if request.is_verified is not None:
+            search.is_verified = request.is_verified
+            
+        db.commit()
+        db.refresh(search)
         return search
 
     @staticmethod

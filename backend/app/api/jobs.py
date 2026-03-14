@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.job_service import JobService
-from ..schemas.schemas import JobSearchRequest, JobListingResponse, SearchNetRequest, SavedSearchResponse, RunVerifiedRequest, RankJobsRequest
+from ..schemas.schemas import JobSearchRequest, JobListingResponse, SearchNetRequest, SavedSearchResponse, RunVerifiedRequest, RankJobsRequest, SavedSearchCreateRequest, SavedSearchUpdateRequest
 from typing import List, Optional
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -19,9 +19,16 @@ async def generate_search_net(request: SearchNetRequest, db: Session = Depends(g
 def get_saved_searches(resume_id: Optional[int] = None, db: Session = Depends(get_db)):
     return JobService.get_saved_searches(db, resume_id)
 
-@router.patch("/saved-searches/{search_id}")
-def update_saved_search(search_id: int, is_verified: bool, db: Session = Depends(get_db)):
-    return JobService.update_saved_search(db, search_id, is_verified)
+@router.post("/saved-searches", response_model=SavedSearchResponse)
+def create_saved_search(request: SavedSearchCreateRequest, db: Session = Depends(get_db)):
+    return JobService.create_saved_search(db, request)
+
+@router.patch("/saved-searches/{search_id}", response_model=SavedSearchResponse)
+def update_saved_search(search_id: int, request: SavedSearchUpdateRequest, db: Session = Depends(get_db)):
+    search = JobService.update_saved_search(db, search_id, request)
+    if not search:
+        raise HTTPException(status_code=404, detail="Search not found")
+    return search
 
 @router.delete("/saved-searches/{search_id}")
 def delete_saved_search(search_id: int, db: Session = Depends(get_db)):

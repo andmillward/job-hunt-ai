@@ -17,14 +17,17 @@ export const jobService = {
   getSavedSearches: (resumeId: number) => 
     apiClient.get<SavedSearch[]>(`/jobs/saved-searches?resume_id=${resumeId}`),
   
+  createSavedSearch: (data: any) =>
+    apiClient.post<SavedSearch>('/jobs/saved-searches', data),
+
+  updateSavedSearch: (id: number, data: any) => 
+    apiClient.patch<SavedSearch>(`/jobs/saved-searches/${id}`, data),
+  
   generateSearchNet: (dreamRole: string, resumeId: number) => 
     apiClient.post('/jobs/search-net', { dream_role: dreamRole, resume_id: resumeId }),
   
   runVerifiedNet: (resumeId: number) => 
     apiClient.post('/jobs/run-verified', { resume_id: resumeId }),
-  
-  toggleVerifySearch: (id: number, isVerified: boolean) => 
-    apiClient.patch(`/jobs/saved-searches/${id}?is_verified=${isVerified}`),
   
   deleteSavedSearch: (id: number) => 
     apiClient.delete(`/jobs/saved-searches/${id}`),

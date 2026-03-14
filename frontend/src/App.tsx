@@ -35,6 +35,7 @@ function App() {
     uploading,
     fetchResumes,
     uploadResume,
+    updateResume,
     deleteResume
   } = useResumes(showToast)
 
@@ -52,7 +53,8 @@ function App() {
     handleGenerateNet,
     handleRunVerifiedNet,
     handleSingleSearch,
-    toggleVerifySearch,
+    addSavedSearch,
+    updateSavedSearch,
     deleteSavedSearch,
     clearUnverifiedSearches,
     rankedJobs,
@@ -159,9 +161,11 @@ function App() {
               onGenerateNet={() => handleGenerateNet(dreamRole)}
               onRunVerifiedNet={handleRunVerifiedNet}
               onSingleSearch={handleSingleSearch}
-              onToggleVerifySearch={toggleVerifySearch}
+              onAddSearch={addSavedSearch}
+              onUpdateSearch={updateSavedSearch}
               onDeleteSearch={deleteSavedSearch}
               onClearUnverified={clearUnverifiedSearches}
+              onUpdateResume={updateResume}
               jobs={jobs}
               rankedJobs={rankedJobs}
               unrankedCount={unrankedCount}
