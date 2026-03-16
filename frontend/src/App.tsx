@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/common/Sidebar'
 import Toast from './components/common/Toast'
-import HubView from './views/HubView'
 import WorkspaceView from './views/WorkspaceView'
 import SettingsView from './views/SettingsView'
 import { useResumes } from './hooks/useResumes'
@@ -10,7 +9,7 @@ import { useSettings } from './hooks/useSettings'
 import { Toast as ToastType } from './types'
 
 function App() {
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'hub')
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'workspace')
   const [workspaceTab, setWorkspaceTab] = useState('breakdown')
   const [showDebug, setShowDebug] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(true)
@@ -105,12 +104,7 @@ function App() {
 
   const handleSelectResume = (resume: any) => {
     setSelectedResume(resume)
-    setActiveTab('workspace')
     setWorkspaceTab('breakdown')
-  }
-
-  const handleBackToHub = () => {
-    setActiveTab('hub')
   }
 
   const toggleExpandJob = (id: number) => {
@@ -134,23 +128,22 @@ function App() {
 
       <div className="flex-1 pl-64 overflow-y-auto">
         <div className={`p-10 mx-auto ${activeTab === 'workspace' ? 'max-w-none' : 'max-w-6xl'}`}>
-          {activeTab === 'hub' && (
-            <HubView 
+          {activeTab === 'workspace' && (
+            <WorkspaceView 
+              // Resume Hub Integration
               resumes={resumes}
               selectedResume={selectedResume}
               uploading={uploading}
-              onUpload={uploadResume}
-              onSelect={handleSelectResume}
-              onDelete={deleteResume}
-            />
-          )}
+              onUploadResume={uploadResume}
+              onSelectResume={handleSelectResume}
+              onDeleteResume={deleteResume}
+              onUpdateResume={updateResume}
 
-          {activeTab === 'workspace' && selectedResume && (
-            <WorkspaceView 
-              selectedResume={selectedResume}
+              // Wizard State
               workspaceTab={workspaceTab}
               setWorkspaceTab={setWorkspaceTab}
-              onBackToHub={handleBackToHub}
+
+              // Actions & State
               searchingJobs={searchingJobs}
               rankingJobs={rankingJobs}
               runningNet={runningNet}
@@ -165,7 +158,6 @@ function App() {
               onUpdateSearch={updateSavedSearch}
               onDeleteSearch={deleteSavedSearch}
               onClearUnverified={clearUnverifiedSearches}
-              onUpdateResume={updateResume}
               jobs={jobs}
               rankedJobs={rankedJobs}
               unrankedCount={unrankedCount}

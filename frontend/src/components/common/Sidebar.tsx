@@ -1,5 +1,5 @@
 import React from 'react'
-import { Target, LayoutDashboard, Briefcase, Settings, Moon, Sun, Code } from 'lucide-react'
+import { Target, Briefcase, Settings, Moon, Sun, Code } from 'lucide-react'
 import { Resume } from '../../types'
 
 interface SidebarProps {
@@ -34,20 +34,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       
       <nav className="flex-1 space-y-2">
         <button 
-          onClick={() => setActiveTab('hub')}
-          className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold text-sm ${activeTab === 'hub' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+          onClick={() => setActiveTab('workspace')}
+          className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold text-sm ${activeTab === 'workspace' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
         >
-          <LayoutDashboard className="w-4 h-4" /> Resume Hub
+          <Briefcase className="w-4 h-4" /> The Hunt
         </button>
-        
-        {selectedResume && (
-          <button 
-            onClick={() => setActiveTab('workspace')}
-            className={`w-full flex items-center gap-3 p-3 rounded-xl transition font-bold text-sm ${activeTab === 'workspace' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-          >
-            <Briefcase className="w-4 h-4" /> Hunt Workspace
-          </button>
-        )}
 
         <button 
           onClick={() => setActiveTab('settings')}
