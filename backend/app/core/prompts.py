@@ -43,8 +43,12 @@ A good "Net" includes a mix of:
 2. Skill-specific queries (e.g., "Kotlin Backend Engineer").
 3. Industry-specific queries (e.g., "Fintech Software Engineer").
 
+CRITICAL: Keep keywords extremely concise (2-4 words max). 
+AVOID over-specification (e.g. DO NOT include "AWS DynamoDB Docker Micronaut" all in one query).
+Instead, split skills across multiple queries (e.g. "Kotlin AWS Engineer", "Micronaut Backend", etc.).
+
 Return ONLY a JSON array of objects. Each object MUST have:
-- keywords: string (Keep keywords concise, 3-5 words max per query for best search engine compatibility)
+- keywords: string (Concise query, e.g. "Senior Kotlin Engineer")
 - location: string or null (e.g. "USA", "London", "Remote")
 - min_salary: integer or null
 - remote_only: boolean

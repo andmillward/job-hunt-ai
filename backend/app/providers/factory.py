@@ -29,14 +29,19 @@ class ProviderFactory:
         """
         Returns a list of active search providers based on configuration.
         """
-        active_providers = [
-            ("jobspy", JobSpyProvider()),
-            ("jobcatcher", JobCatcherProvider())
-        ]
+        active_providers = []
         
-        # JSearch requires an API key to be considered active
+        # JobSpy
+        if SettingsService.get_setting(db, "ENABLE_JOBSPY") != "false":
+            active_providers.append(("jobspy", JobSpyProvider()))
+            
+        # JobCatcher
+        if SettingsService.get_setting(db, "ENABLE_JOBCATCHER") != "false":
+            active_providers.append(("jobcatcher", JobCatcherProvider()))
+        
+        # JSearch requires an API key AND to be enabled
         jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
-        if jsearch_key:
+        if jsearch_key and SettingsService.get_setting(db, "ENABLE_JSEARCH") != "false":
             active_providers.append(("jsearch", JSearchProvider()))
             
         return active_providers

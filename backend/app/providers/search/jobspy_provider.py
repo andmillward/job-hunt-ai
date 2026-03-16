@@ -28,6 +28,8 @@ class JobSpyProvider(BaseSearchProvider):
         mapped_job_type = jt_map.get(job_type) if job_type else None
         
         try:
+            logger.info(f">>> PROVIDER: JobSpy Scrape Params - Search Term: {keywords}, Location: {location}, Is Remote: {remote_only}, Job Type: {mapped_job_type}, Hours Old: {hours_old}")
+            
             # Note: JobSpy is sync, so we just call it. 
             # It's wrapped in asyncio.to_thread if called from search_and_store_jobs logic
             jobs_df = scrape_jobs(
@@ -36,9 +38,7 @@ class JobSpyProvider(BaseSearchProvider):
                 location=location,
                 results_wanted=results_wanted,
                 hours_old=hours_old,
-                country=kwargs.get("country", "usa"), # This parameter name might be a typo in the original library usage? 
-                # Checking JobSpy docs, it should be 'country_secondary' or 'country'
-                # Actually, I'll use 'country' as most providers do.
+                country=kwargs.get("country", "usa"), 
                 is_remote=remote_only,
                 job_type=mapped_job_type,
                 min_salary=min_salary
@@ -46,6 +46,7 @@ class JobSpyProvider(BaseSearchProvider):
             
             standardized_jobs = []
             if jobs_df is None or jobs_df.empty:
+                logger.warning(f">>> PROVIDER: JobSpy - No results returned for '{keywords}'")
                 return []
                 
             for _, job in jobs_df.iterrows():

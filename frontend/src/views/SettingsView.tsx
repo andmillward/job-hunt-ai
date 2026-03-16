@@ -73,6 +73,44 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
         <div className="space-y-8 pt-6 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-500">
+              <Radio className="w-5 h-5" />
+            </div>
+            <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight">Provider Control</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { id: 'ENABLE_JOBSPY', label: 'JobSpy' },
+              { id: 'ENABLE_JOBCATCHER', label: 'JobCatcher' },
+              { id: 'ENABLE_JSEARCH', label: 'JSearch' }
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => onUpdateSetting(p.id, settings[p.id] === 'false' ? 'true' : 'false')}
+                className={`p-6 rounded-3xl border-2 transition-all flex flex-col gap-4 items-start ${
+                  settings[p.id] !== 'false' 
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-500/20' 
+                    : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-600'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                  settings[p.id] !== 'false' ? 'bg-white/20' : 'bg-slate-200 dark:bg-slate-800'
+                }`}>
+                  <Radio className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <div className={`text-[10px] font-black uppercase tracking-widest ${
+                    settings[p.id] !== 'false' ? 'text-white/60' : 'text-slate-400'
+                  }`}>Provider</div>
+                  <div className="text-sm font-black uppercase">{p.label}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-8 pt-6 border-t border-slate-100 dark:border-slate-800">
           <div className="flex justify-between items-center">
             <h3 className="text-xl font-black text-slate-800 dark:text-white tracking-tight flex items-center gap-4">
               <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-500"><Database className="w-5 h-5" /></div> Model Selection

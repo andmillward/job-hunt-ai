@@ -6,6 +6,9 @@ export const settingsService = {
   
   updateSetting: (key: string, value: string) => 
     apiClient.post('/settings', { key, value }),
+
+  validateSetting: (key: string, value: string) =>
+    apiClient.post('/settings/validate', { key, value }),
   
   getGeminiModels: () => 
     apiClient.get('/models/gemini'),

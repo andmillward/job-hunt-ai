@@ -1,84 +1,91 @@
-# Job Hunt AI Agent
+# 🤖 Job Hunt AI Agent
 
-A full-stack job application automation tool using a Python backend (FastAPI) and React frontend.
+A state-of-the-art job search and application automation platform. It uses a **Python (FastAPI)** backend and a **React (TypeScript)** frontend to orchestrate AI-driven resume parsing, intelligent job discovery via a "Search Net," and deep company sentiment analysis.
 
-## Prerequisites
+## 📸 Platform Overview
 
-- [Python 3.12+](https://www.python.org/downloads/)
-- [Node.js 20+](https://nodejs.org/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for PostgreSQL)
-- [Gemini API Key](https://aistudio.google.com/) (for AI parsing)
+### Resume Intelligence
+Analyze your profile to extract structured skills and professional experience.
+![Resume Breakdown](./frontend/Profile-resume-upload-and-breakdown.png)
 
-## Setup
+### Search Net Generation
+AI-generated search meshes that optimize for volume and specificity.
+![Search Net](./frontend/search-net-search-generation.png)
 
-### 1. Backend (Python FastAPI)
+### Job Radar
+Live tracking of new opportunities across LinkedIn, Indeed, Glassdoor, and JSearch.
+![Job Radar](./frontend/job-radar-search-results.png)
 
-Create a virtual environment and install dependencies:
+---
 
+## 🛠 Prerequisites
+
+Before starting, ensure you have the following installed:
+- **[Node.js 20+](https://nodejs.org/)** (Frontend & Toolchain)
+- **[Python 3.12+](https://www.python.org/downloads/)** (Backend Logic)
+- **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** (Required for PostgreSQL database)
+
+### 🔑 AI & Search Intelligence
+This project orchestrates multiple intelligence layers. You will need to configure at least **one** AI provider and **one** search source:
+
+- **AI Engine (Choose at least one)**:
+    - **[Google AI Studio (Gemini)](https://aistudio.google.com/app/apikey)**: Native support for long-context resume parsing.
+    - **[OpenAI (GPT-4o)](https://platform.openai.com/api-keys)**: High-accuracy ranking and deduplication.
+    - **[Ollama](https://ollama.com/)**: Run models locally (e.g., Llama 3) for privacy-conscious processing.
+- **Search Sources**:
+    - **[RapidAPI (JSearch)](https://rapidapi.com/jsearch-api-jsearch-api-default/api/jsearch)**: Provides deep access to job listings across the web. Get your key from the [RapidAPI Developer Dashboard](https://rapidapi.com/developer/dashboard).
+    - **Open-Source Scrapers**: The system includes built-in support for **JobSpy** and **JobCatcher**, which require no API keys but can be toggled in the settings.
+
+---
+
+## 🚀 Getting Started
+
+### 1. Database & Infrastructure
+The system uses PostgreSQL for persistence. Spin it up using Docker:
+```bash
+docker-compose up -d db
+```
+
+### 2. Backend Setup (FastAPI)
+Navigate to the `backend` directory, create a virtual environment, and install requirements:
 ```bash
 cd backend
 python -m venv .venv
-# On Windows:
+
+# Activate (Windows)
 .venv\Scripts\activate
-# On macOS/Linux:
+# Activate (macOS/Linux)
 source .venv/bin/activate
 
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
+python run.py
 ```
+*Note: The backend runs on `http://localhost:8000`.*
 
-### 2. Frontend (React + Vite)
-
-Install dependencies:
-
+### 3. Frontend Setup (React)
+Navigate to the `frontend` directory and install dependencies:
 ```bash
 cd frontend
 npm install
-```
-
-### 3. Docker (PostgreSQL)
-
-Ensure Docker Desktop is running, then start the database:
-
-```bash
-docker-compose up -d db
-```
-
-### 4. Environment Variables
-
-Create a `.env` file in the root directory (or `backend/`) with your Gemini API Key:
-
-```env
-GEMINI_API_KEY=your_key_here
-```
-
-## Running the Application
-
-### Using VS Code (Recommended)
-
-1. Open the project in VS Code.
-2. Go to the **Run and Debug** view (`Ctrl+Shift+D`).
-3. Select **"Full Stack: Backend + Frontend"**.
-4. Press **F5**.
-
-### Manual Start
-
-#### Start the Database:
-```bash
-docker-compose up -d db
-```
-
-#### Start the Backend:
-```bash
-cd backend
-python main.py
-```
-
-#### Start the Frontend:
-```bash
-cd frontend
 npm run dev
 ```
+*Note: The UI will be available at `http://localhost:5173`.*
 
-## AI Parsing
+---
 
-When you upload a resume, the system uses Gemini to parse it into structured JSON. Ensure you have your `GEMINI_API_KEY` set up for this to work.
+## ⚙️ Configuration & Hardware Toggles
+
+Once the app is running, navigate to the **Configuration** tab. You can store your API keys directly in the UI for persistence in the database:
+
+- **AI Credentials**: Input your `GEMINI_API_KEY` and `JSEARCH_API_KEY`. The UI will perform a **Health Check** to verify connectivity.
+- **Provider Control**: Enable or disable specific search engines (**JobSpy**, **JobCatcher**, **JSearch**) to optimize your search runs or debug specific scrapers.
+- **Model Selection**: Switch between **Cloud Intelligence** (Gemini/OpenAI) or your **Local Neural Engine** (Ollama).
+
+---
+
+## 🧠 Core Features
+
+- **Automated Deduplication**: Incremental AI logic that groups identical job postings from different sites into a single primary candidate.
+- **Company Intel**: Batched analysis of company sentiment via Reddit, Glassdoor, and X (Twitter) vibes.
+- **Job Alignment Scoring**: A proprietary 1-10 scoring system that ranks jobs based on skill match and cultural alignment.
+- **Verified Search Net**: A collection of AI-optimized queries that you can verify before deploying into the "wild."

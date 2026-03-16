@@ -45,7 +45,25 @@ export const useSettings = (showToast: any) => {
     try {
       await settingsService.updateSetting(key, value)
       setSettings(prev => ({ ...prev, [key]: value }))
-      showToast(`${key.replace(/_/g, ' ')} saved successfully`)
+      
+      // Perform validation if it's a key or URL
+      const checkable = ['GEMINI_API_KEY', 'OLLAMA_URL', 'OPENAI_API_KEY', 'JSEARCH_API_KEY']
+      if (checkable.includes(key)) {
+        showToast(`Storing and verifying ${key.replace(/_/g, ' ')}...`, 'info')
+        try {
+          const resp = await settingsService.validateSetting(key, value)
+          if (resp.data.status === 'success') {
+            showToast(resp.data.message, 'success')
+          } else if (resp.data.status === 'error') {
+            showToast(resp.data.message, 'error')
+          }
+        } catch (vErr) {
+          console.error("Validation failed", vErr)
+        }
+      } else {
+        showToast(`${key.replace(/_/g, ' ')} saved successfully`)
+      }
+
       if (key === 'GEMINI_API_KEY' || key === 'OLLAMA_URL' || key === 'OPENAI_API_KEY') handleAutoDetect()
     } catch (err) {
       console.error('Error updating setting', err)

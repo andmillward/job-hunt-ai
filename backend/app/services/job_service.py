@@ -63,6 +63,7 @@ class JobService:
     ):
         """Executes parallel searches across providers and persists results."""
         providers = ProviderFactory.get_search_providers(db)
+        logger.info(f">>> SERVICE: Orchestrating search with providers: {[p[0] for p in providers]}")
         jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
 
         # Step 1: Execute all searches in parallel
@@ -108,7 +109,8 @@ class JobService:
             if asyncio.iscoroutinefunction(provider.search_jobs):
                 jobs = await provider.search_jobs(keywords=keywords, location=location, results_wanted=results_wanted, **kwargs)
             else:
-                jobs = provider.search_jobs(keywords=keywords, location=location, results_wanted=results_wanted, **kwargs)
+                # Synchronous providers run in a thread to avoid blocking the event loop
+                jobs = await asyncio.to_thread(provider.search_jobs, keywords=keywords, location=location, results_wanted=results_wanted, **kwargs)
             return name, jobs
         except Exception as e:
             logger.error(f">>> SERVICE: Provider {name} failed: {str(e)}")

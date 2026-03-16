@@ -16,7 +16,7 @@ class JSearchProvider(BaseSearchProvider):
         logger.info(f">>> PROVIDER: JSearch searching for '{keywords}' in '{location}'")
         
         query = keywords
-        if location:
+        if location and location.lower() != "remote":
             query += f" in {location}"
             
         url = "https://jsearch.p.rapidapi.com/search"
@@ -27,6 +27,9 @@ class JSearchProvider(BaseSearchProvider):
         
         # Levers
         remote_only = kwargs.get("remote_only", False)
+        # Force remote_only if location is explicitly 'Remote'
+        if location and location.lower() == "remote":
+            remote_only = True
         job_type = kwargs.get("job_type")
         hours_old = kwargs.get("hours_old", 72)
         
@@ -43,10 +46,16 @@ class JSearchProvider(BaseSearchProvider):
         
         params = {
             "query": query,
-            "num_pages": "1",
-            "date_posted": date_posted,
-            "remote_jobs_only": "true" if remote_only else "false"
+            "num_pages": "1"
         }
+        
+        if date_posted != "all":
+            params["date_posted"] = date_posted
+            
+        if remote_only:
+            params["remote_jobs_only"] = "true"
+        
+        logger.info(f">>> PROVIDER: JSearch Request Params: {params}")
         
         if job_type:
             jt_map = {
@@ -64,6 +73,9 @@ class JSearchProvider(BaseSearchProvider):
                 data = response.json()
                 
                 results = data.get("data", [])
+                if not results:
+                    logger.warning(f">>> PROVIDER: JSearch - No data returned for query. Status: {response.status_code}, Full Payload: {data}")
+                
                 standardized_jobs = []
                 
                 for job in results:
