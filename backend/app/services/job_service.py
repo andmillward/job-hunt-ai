@@ -6,11 +6,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime, timedelta
 from ..models import models
-from ..providers.search.jobspy_provider import JobSpyProvider
-from ..providers.search.jsearch_provider import JSearchProvider
-from ..providers.search.jobcatcher_provider import JobCatcherProvider
 from .settings_service import SettingsService
 from .resume_service import ResumeService
+from ..providers.factory import ProviderFactory
+from ..core import constants, prompts
 from ..schemas.schemas import SavedSearchCreateRequest, SavedSearchUpdateRequest
 from typing import List, Optional, Tuple, Any
 
@@ -50,34 +49,6 @@ class JobService:
                 
         return cleaned
 
-    @staticmethod
-    def _get_ai_credentials(db: Session) -> Tuple[str, str, str]:
-        """Resolves the active model and corresponding API key/URL context."""
-        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-        
-        api_key = gemini_key
-        if "openai/" in model.lower() or "gpt" in model.lower():
-            api_key = openai_key
-            
-        return model, api_key, ollama_url
-
-    @staticmethod
-    def get_providers(db: Session):
-        """Returns initialized search providers based on configuration."""
-        providers = [
-            ("jobspy", JobSpyProvider()),
-            ("jobcatcher", JobCatcherProvider())
-        ]
-        
-        jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
-        if jsearch_key:
-            providers.append(("jsearch", JSearchProvider()))
-            
-        return providers
-
     # --- CORE SEARCH ENGINE ---
 
     @classmethod
@@ -86,12 +57,12 @@ class JobService:
         db: Session, 
         keywords: str, 
         location: Optional[str] = None, 
-        results_wanted: int = 50,
-        site_name: List[str] = ["linkedin", "indeed", "glassdoor", "zip_recruiter"],
+        results_wanted: int = constants.DEFAULT_RESULTS_WANTED,
+        site_name: List[str] = constants.DEFAULT_SITES,
         **kwargs
     ):
         """Executes parallel searches across providers and persists results."""
-        providers = cls.get_providers(db)
+        providers = ProviderFactory.get_search_providers(db)
         jsearch_key = SettingsService.get_setting(db, "JSEARCH_API_KEY") or os.getenv("JSEARCH_API_KEY")
 
         # Step 1: Execute all searches in parallel
@@ -161,8 +132,8 @@ class JobService:
             return db_job
         else:
             existing.last_seen_at = datetime.utcnow()
-            if existing.status == "closed":
-                existing.status = "new"
+            if existing.status == constants.JOB_STATUS_CLOSED:
+                existing.status = constants.JOB_STATUS_NEW
             return None
 
     # --- INTELLIGENCE SYNTHESIS ---
@@ -173,8 +144,8 @@ class JobService:
         if not company_names: return
 
         logger.info(f">>> SERVICE: Orchestrating intel for {len(company_names)} companies")
-        model, api_key, ollama_url = cls._get_ai_credentials(db)
-        provider = ResumeService.get_provider(db)
+        model, api_key, ollama_url = SettingsService.get_ai_credentials(db)
+        provider = ProviderFactory.get_ai_provider(db)
         
         if not api_key and "ollama/" not in model.lower():
             logger.warning(">>> SERVICE: Skipping intel - Missing AI credentials")
@@ -195,17 +166,7 @@ class JobService:
     async def _synthesize_batch(cls, db: Session, provider: Any, batch: List[str], model: str, api_key: str, ollama_url: str, semaphore: asyncio.Semaphore):
         """Processes a single batch of companies through the AI provider."""
         async with semaphore:
-            prompt = f"""
-            Provide company intelligence for: {", ".join(batch)}
-            
-            Return ONLY a JSON array of objects. Each object MUST have:
-            - name: string (exact match)
-            - bio: string (max 250 chars)
-            - glassdoor_score: string (e.g. "4.2/5")
-            - reddit_sentiment: string (max 200 chars)
-            - twitter_sentiment: string (max 200 chars)
-            - overall_sentiment_score: integer (1-10)
-            """
+            prompt = prompts.COMPANY_INTEL_PROMPT.format(companies=", ".join(batch))
             
             try:
                 resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
@@ -252,26 +213,14 @@ class JobService:
                 resume.dream_role = dream_role
                 db.commit()
 
-        model, api_key, ollama_url = cls._get_ai_credentials(db)
-        provider = ResumeService.get_provider(db)
+        model, api_key, ollama_url = SettingsService.get_ai_credentials(db)
+        provider = ProviderFactory.get_ai_provider(db)
         
         if not api_key and "ollama/" not in model.lower():
             raise Exception("AI API Key missing.")
 
         resume_context = f"Skills: {resume.parsed_skills}\nExperience: {resume.parsed_experience[:500]}" if resume else ""
-
-        prompt = f"""
-        Generate 5-10 job search queries for: {dream_role}
-        Context: {resume_context}
-        
-        Return ONLY a JSON array of objects:
-        - keywords: string
-        - location: string/null
-        - min_salary: int/null
-        - remote_only: bool
-        - job_type: string/null (full_time, contract, part_time, internship)
-        - hours_old: int (default 72)
-        """
+        prompt = prompts.SEARCH_NET_PROMPT.format(resume_context=resume_context, dream_role=dream_role)
         
         try:
             resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
@@ -297,7 +246,7 @@ class JobService:
                         min_salary=cfg.get("min_salary"),
                         remote_only=cfg.get("remote_only", False),
                         job_type=cfg.get("job_type"),
-                        hours_old=cfg.get("hours_old", 72)
+                        hours_old=cfg.get("hours_old", constants.DEFAULT_HOURS_OLD)
                     )
                     db.add(new_search)
                     db.commit()
@@ -342,9 +291,9 @@ class JobService:
         # Cleanup stale jobs (Detect closed listings)
         stale_threshold = start_time - timedelta(minutes=5)
         stale_count = db.query(models.JobListing).filter(
-            models.JobListing.status == "new",
+            models.JobListing.status == constants.JOB_STATUS_NEW,
             models.JobListing.last_seen_at < stale_threshold
-        ).update({models.JobListing.status: "closed"})
+        ).update({models.JobListing.status: constants.JOB_STATUS_CLOSED})
         db.commit()
             
         return {"found": total_found, "new": total_new, "closed": stale_count}
@@ -376,8 +325,8 @@ class JobService:
 
         # Step 2: Scoring
         logger.info(f">>> SERVICE: Scoring alignment for {len(jobs_to_rank)} listings")
-        model, api_key, ollama_url = cls._get_ai_credentials(db)
-        provider = ResumeService.get_provider(db)
+        model, api_key, ollama_url = SettingsService.get_ai_credentials(db)
+        provider = ProviderFactory.get_ai_provider(db)
         
         jobs_payload = []
         for j in jobs_to_rank:
@@ -392,20 +341,8 @@ class JobService:
                 "company_context": intel_ctx
             })
 
-        prompt = f"""
-        Score these jobs against the profile:
-        Skills: {resume.parsed_skills}
-        Dream Role: {resume.dream_role}
-        
-        Jobs: {json.dumps(jobs_payload)}
-        
-        Return ONLY a JSON array of objects:
-        - id: int
-        - score_skills: int (1-10)
-        - score_culture: int (1-10)
-        - score_overall: int (1-10)
-        - ai_insight: string (max 150 chars)
-        """
+        profile_context = f"Skills: {resume.parsed_skills}\nDream Role: {resume.dream_role}"
+        prompt = prompts.JOB_RANKING_PROMPT.format(profile_context=profile_context, jobs_json=json.dumps(jobs_payload))
         
         try:
             resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
@@ -446,32 +383,27 @@ class JobService:
             companies_to_check = db.query(models.JobListing.company).filter(models.JobListing.id.in_(target_job_ids)).distinct().all()
         else:
             # Fallback to full check if no targets provided (safety)
-            companies_to_check = db.query(models.JobListing.company).filter(models.JobListing.parent_id == None, models.JobListing.status == "new").distinct().all()
+            companies_to_check = db.query(models.JobListing.company).filter(models.JobListing.parent_id == None, models.JobListing.status == constants.JOB_STATUS_NEW).distinct().all()
             
         company_names = [c[0] for c in companies_to_check]
         if not company_names: return {"status": "complete", "deduped_count": 0}
 
         # Step 2: Batch process by company
         deduped_count = 0
-        model, api_key, ollama_url = cls._get_ai_credentials(db)
-        provider = ResumeService.get_provider(db)
+        model, api_key, ollama_url = SettingsService.get_ai_credentials(db)
+        provider = ProviderFactory.get_ai_provider(db)
 
         for company in company_names:
             # For each company, fetch all primary candidates
             group = db.query(models.JobListing).filter(
                 models.JobListing.company == company,
                 models.JobListing.parent_id == None,
-                models.JobListing.status != "duplicate"
+                models.JobListing.status != constants.JOB_STATUS_DUPLICATE
             ).all()
             
             if len(group) < 2: continue
             
-            prompt = f"""
-            Identify duplicate job listings for '{company}'.
-            Jobs: {json.dumps([{'id': j.id, 'title': j.title} for j in group])}
-            
-            Return ONLY a JSON array of arrays (grouped IDs). The first ID in each sub-array is the PRIMARY.
-            """
+            prompt = prompts.DEDUPLICATION_PROMPT.format(company=company, jobs_json=json.dumps([{'id': j.id, 'title': j.title} for j in group]))
             
             try:
                 resp_raw = provider.complete(prompt, model, api_key, ollama_url=ollama_url)
@@ -484,7 +416,7 @@ class JobService:
                         dup_job = db.query(models.JobListing).filter(models.JobListing.id == dup_id).first()
                         if dup_job:
                             dup_job.parent_id = primary_id
-                            dup_job.status = "duplicate"
+                            dup_job.status = constants.JOB_STATUS_DUPLICATE
                             deduped_count += 1
                 db.commit()
             except: continue

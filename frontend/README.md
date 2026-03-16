@@ -48,3 +48,10 @@ export default tseslint.config({
   },
 })
 ```
+## Screen shots
+Profile
+![profile](Profile-resume-upload-and-breakdown.png)
+Seach builder
+![search-net](search-net-search-generation.png)
+Results
+![job-radar](job-radar-search-results.png)

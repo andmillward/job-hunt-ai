@@ -28,18 +28,30 @@ class JSearchProvider(BaseSearchProvider):
         # Levers
         remote_only = kwargs.get("remote_only", False)
         job_type = kwargs.get("job_type")
+        hours_old = kwargs.get("hours_old", 72)
+        
+        # Map hours_old to JSearch date_posted
+        date_posted = "all"
+        if hours_old <= 24:
+            date_posted = "today"
+        elif hours_old <= 72:
+            date_posted = "3days"
+        elif hours_old <= 168:
+            date_posted = "week"
+        else:
+            date_posted = "month"
         
         params = {
             "query": query,
             "num_pages": "1",
-            "date_posted": "3days",
+            "date_posted": date_posted,
             "remote_jobs_only": "true" if remote_only else "false"
         }
         
         if job_type:
             jt_map = {
                 "full_time": "FULLTIME",
-                "contract": "CONTRACT",
+                "contract": "CONTRACTOR", # Corrected for JSearch
                 "part_time": "PARTTIME",
                 "internship": "INTERN"
             }

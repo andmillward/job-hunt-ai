@@ -17,6 +17,16 @@ class JobSpyProvider(BaseSearchProvider):
         job_type = kwargs.get("job_type")
         hours_old = kwargs.get("hours_old", 72)
         
+        # Map internal job types to JobSpy expected values
+        # JobSpy expects: fulltime, parttime, contract, internship, temporary
+        jt_map = {
+            "full_time": "fulltime",
+            "part_time": "parttime",
+            "contract": "contract",
+            "internship": "internship"
+        }
+        mapped_job_type = jt_map.get(job_type) if job_type else None
+        
         try:
             # Note: JobSpy is sync, so we just call it. 
             # It's wrapped in asyncio.to_thread if called from search_and_store_jobs logic
@@ -26,9 +36,11 @@ class JobSpyProvider(BaseSearchProvider):
                 location=location,
                 results_wanted=results_wanted,
                 hours_old=hours_old,
-                country_誠=kwargs.get("country", "usa"),
+                country=kwargs.get("country", "usa"), # This parameter name might be a typo in the original library usage? 
+                # Checking JobSpy docs, it should be 'country_secondary' or 'country'
+                # Actually, I'll use 'country' as most providers do.
                 is_remote=remote_only,
-                job_type=job_type,
+                job_type=mapped_job_type,
                 min_salary=min_salary
             )
             

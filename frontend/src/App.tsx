@@ -9,7 +9,10 @@ import { useSettings } from './hooks/useSettings'
 import { Toast as ToastType } from './types'
 
 function App() {
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'workspace')
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem('activeTab')
+    return (saved === 'hub' || !saved) ? 'workspace' : saved
+  })
   const [workspaceTab, setWorkspaceTab] = useState('breakdown')
   const [showDebug, setShowDebug] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(true)

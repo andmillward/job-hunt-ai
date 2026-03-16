@@ -65,12 +65,27 @@ class GeminiNativeProvider(BaseAIProvider):
     def list_models(self, api_key: str, **kwargs) -> List[dict]:
         try:
             client = self._get_client(api_key)
-            # Providing stable defaults for the new SDK to ensure reliability
+            models_list = client.models.list()
+            results = []
+            for m in models_list:
+                # The new SDK model object has name attribute (e.g. 'models/gemini-1.5-flash')
+                if "gemini" in m.name.lower():
+                    model_id = f"gemini/{m.name.replace('models/', '')}"
+                    results.append({"id": model_id, "name": m.display_name or m.name})
+            
+            # If dynamic list failed or is empty, provide stable defaults
+            if not results:
+                results = [
+                    {"id": "gemini/gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+                    {"id": "gemini/gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+                    {"id": "gemini/gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash Exp"}
+                ]
+            return results
+        except Exception as e:
+            logger.error(f">>> PROVIDER: GeminiNative ListModels Error: {str(e)}")
+            # Fallback to stable defaults on error
             return [
                 {"id": "gemini/gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
                 {"id": "gemini/gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
                 {"id": "gemini/gemini-2.0-flash-exp", "name": "Gemini 2.0 Flash Exp"}
             ]
-        except Exception as e:
-            logger.error(f">>> PROVIDER: GeminiNative ListModels Error: {str(e)}")
-            return []

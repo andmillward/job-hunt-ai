@@ -3,10 +3,10 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services.settings_service import SettingsService
 from ..schemas.schemas import SettingUpdate
-import google.generativeai as genai
-import os
+from ..providers.factory import ProviderFactory
+from ..core import constants
 import logging
-import httpx
+import os
 
 logger = logging.getLogger("uvicorn")
 router = APIRouter(tags=["settings"])
@@ -22,52 +22,27 @@ def update_setting(update: SettingUpdate, db: Session = Depends(get_db)):
 @router.get("/models/gemini")
 def list_gemini_models(db: Session = Depends(get_db)):
     key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if not key:
-        return []
-    try:
-        genai.configure(api_key=key)
-        models_list = genai.list_models()
-        results = []
-        for m in models_list:
-            if "generateContent" in m.supported_generation_methods:
-                model_id = f"gemini/{m.name.replace('models/', '')}"
-                results.append({"id": model_id, "name": m.display_name})
-        return results
-    except Exception as e:
-        logger.error(f"Error listing gemini models: {e}")
-        return []
+    if not key: return []
+    
+    # We use the native provider for Gemini listing
+    from ..providers.ai.gemini_provider import GeminiNativeProvider
+    return GeminiNativeProvider().list_models(api_key=key)
 
 @router.get("/models/ollama")
-async def list_ollama_models(db: Session = Depends(get_db)):
-    url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
-    url = url.rstrip("/")
-    logger.info(f">>> SETTINGS: Fetching Ollama models from {url}")
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{url}/api/tags")
-            if response.status_code == 200:
-                models_data = response.json().get("models", [])
-                logger.info(f">>> SETTINGS: Found {len(models_data)} Ollama models")
-                results = []
-                for m in models_data:
-                    model_name = m.get("name")
-                    results.append({
-                        "id": f"ollama/{model_name}",
-                        "name": f"Ollama: {model_name}"
-                    })
-                return results
-            else:
-                logger.error(f">>> SETTINGS: Ollama returned status {response.status_code}")
-                return []
-    except Exception as e:
-        logger.error(f">>> SETTINGS: Error listing ollama models at {url}: {e}")
-        return []
+def list_ollama_models(db: Session = Depends(get_db)):
+    url = SettingsService.get_setting(db, "OLLAMA_URL") or constants.DEFAULT_OLLAMA_URL
+    
+    from ..providers.ai.ollama_provider import OllamaProvider
+    return OllamaProvider().list_models(ollama_url=url)
 
 @router.get("/models/openai")
 async def list_openai_models(db: Session = Depends(get_db)):
     key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if not key:
-        return []
+    if not key: return []
+    
+    # OpenAI is handled via LiteLLM provider logic or direct API
+    # For simplicity and scalability, let's keep the specialized listing here or move to a provider helper
+    import httpx
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
@@ -76,7 +51,6 @@ async def list_openai_models(db: Session = Depends(get_db)):
             )
             if response.status_code == 200:
                 models_data = response.json().get("data", [])
-                # Filter for common chat models to avoid clutter
                 results = []
                 for m in models_data:
                     model_id = m.get("id")

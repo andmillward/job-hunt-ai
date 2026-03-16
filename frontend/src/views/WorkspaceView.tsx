@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { ArrowLeft, Loader2, FileText, Radio, Radar, Save, Edit2, X, Target, Zap } from 'lucide-react'
+import { ArrowLeft, Loader2, FileText, Radio, Radar, Save, Edit2, X, Target } from 'lucide-react'
 import { Resume, Job, SavedSearch } from '../types'
 import SearchNetGenerator from '../components/workspace/SearchNetGenerator'
 import JobRadar from '../components/workspace/JobRadar'
@@ -145,8 +145,20 @@ const WorkspaceView: React.FC<WorkspaceViewProps> = ({
       <div className="min-h-[600px]">
         {workspaceTab === 'breakdown' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start animate-in fade-in duration-500">
+            {/* 1/3 AREA: HUB CONTROLS */}
+            <div className="space-y-8 order-2 lg:order-1">
+              <ResumeUpload onUpload={onUploadResume} uploading={uploading} />
+              
+              <ResumeList 
+                resumes={resumes} 
+                selectedResume={selectedResume} 
+                onSelect={onSelectResume} 
+                onDelete={onDeleteResume} 
+              />
+            </div>
+
             {/* 2/3 AREA: PROFILE ANALYSIS */}
-            <div className="lg:col-span-2 space-y-8">
+            <div className="lg:col-span-2 space-y-8 order-1 lg:order-2">
               {selectedResume ? (
                 <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-800 shadow-sm space-y-10">
                   <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-6">
@@ -237,17 +249,6 @@ const WorkspaceView: React.FC<WorkspaceViewProps> = ({
                 </div>
               )}
             </div>
-
-            {/* 1/3 AREA: HUB CONTROLS */}
-            <div className="space-y-8">
-              <ResumeUpload onUpload={onUploadResume} uploading={uploading} />
-              <ResumeList 
-                resumes={resumes} 
-                selectedResume={selectedResume} 
-                onSelect={onSelectResume} 
-                onDelete={onDeleteResume} 
-              />
-            </div>
           </div>
         )}
 
@@ -279,7 +280,7 @@ const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             scanLimit={scanLimit}
             setScanLimit={setScanLimit}
             onRankJobs={onRankJobs}
-            onUpdateStatus={onUpdateJobStatus}
+            onUpdateJobStatus={onUpdateJobStatus}
             expandedJobs={expandedJobs}
             onToggleExpand={onToggleExpandJob}
           />

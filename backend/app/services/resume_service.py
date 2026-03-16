@@ -5,48 +5,44 @@ from docx import Document
 from sqlalchemy.orm import Session
 from ..models import models
 from .settings_service import SettingsService
-from ..providers.ai.gemini_provider import GeminiNativeProvider
-from ..providers.ai.litellm_provider import LiteLLMProvider
-from ..providers.ai.ollama_provider import OllamaProvider
+from ..providers.factory import ProviderFactory
+from ..core import constants, prompts
 from ..schemas.schemas import ResumeUpdateRequest
 import os
 
 logger = logging.getLogger("uvicorn")
 
 class ResumeService:
+    """
+    Handles resume processing, profile management, and AI parsing orchestration.
+    """
+
+    # --- TEXT EXTRACTION ---
+
     @staticmethod
     def extract_text_from_pdf(file_bytes: bytes) -> str:
+        """Parses raw text from PDF bytes."""
         pdf = PdfReader(io.BytesIO(file_bytes))
         return "\n".join([page.extract_text() for page in pdf.pages])
 
     @staticmethod
     def extract_text_from_docx(file_bytes: bytes) -> str:
+        """Parses raw text from DOCX bytes."""
         doc = Document(io.BytesIO(file_bytes))
         return "\n".join([para.text for para in doc.paragraphs])
 
-    @staticmethod
-    def get_provider(db: Session):
-        provider_type = SettingsService.get_ai_provider_type(db)
-        if provider_type == "ollama":
-            return OllamaProvider()
-        if provider_type == "native":
-            return GeminiNativeProvider()
-        return LiteLLMProvider()
+    # --- AI ORCHESTRATION ---
 
     @classmethod
     def parse_resume_with_llm(cls, text: str, db: Session) -> dict:
-        model = SettingsService.get_setting(db, "AI_MODEL") or "gemini/gemini-1.5-flash"
-        gemini_key = SettingsService.get_setting(db, "GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-        openai_key = SettingsService.get_setting(db, "OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        ollama_url = SettingsService.get_setting(db, "OLLAMA_URL") or "http://localhost:11434"
+        """Sends extracted text to AI for structured parsing."""
+        model, api_key, ollama_url = SettingsService.get_ai_credentials(db)
+        provider = ProviderFactory.get_ai_provider(db)
         
-        api_key = gemini_key if "gemini" in model.lower() else openai_key
-        
-        provider = cls.get_provider(db)
-        
-        # Validation
         if not api_key and "ollama/" not in model.lower():
             return {"skills": ["Error: API Key missing"], "experience": "Please set your key in Settings.", "education": ""}
+
+        prompt = prompts.RESUME_PARSE_PROMPT.format(text=text)
 
         try:
             return provider.parse_resume(text, model, api_key, ollama_url=ollama_url)
@@ -58,8 +54,11 @@ class ResumeService:
                 "education": ""
             }
 
+    # --- PROFILE MANAGEMENT ---
+
     @classmethod
     async def process_resume_upload(cls, file_name: str, content: bytes, db: Session):
+        """Pipeline for storage, text extraction, and AI analysis of a new resume."""
         logger.info(f">>> BACKEND: Processing upload: {file_name}")
         
         db_resume = models.Resume(file_name=file_name, file_data=content)
@@ -68,21 +67,15 @@ class ResumeService:
         db.refresh(db_resume)
 
         try:
-            filename_lower = file_name.lower()
-            text = ""
-            if filename_lower.endswith(".pdf"):
-                text = cls.extract_text_from_pdf(content)
-            elif filename_lower.endswith(".docx"):
-                text = cls.extract_text_from_docx(content)
-            else:
-                text = content.decode("utf-8", errors="ignore")
-
+            text = cls._extract_text(file_name, content)
             if text.strip():
                 logger.info(f">>> BACKEND: Extracted {len(text)} chars. Handing to AI...")
                 parsed_data = cls.parse_resume_with_llm(text, db)
+                
                 db_resume.parsed_skills = ", ".join(parsed_data.get("skills", []))
                 db_resume.parsed_experience = parsed_data.get("experience", "")
                 db_resume.parsed_education = parsed_data.get("education", "")
+                
                 db.commit()
                 db.refresh(db_resume)
                 logger.info(">>> BACKEND: Parse complete.")
@@ -94,6 +87,16 @@ class ResumeService:
 
         return db_resume
 
+    @classmethod
+    def _extract_text(cls, file_name: str, content: bytes) -> str:
+        """Helper to route extraction based on file extension."""
+        ext = file_name.lower()
+        if ext.endswith(".pdf"):
+            return cls.extract_text_from_pdf(content)
+        if ext.endswith(".docx"):
+            return cls.extract_text_from_docx(content)
+        return content.decode("utf-8", errors="ignore")
+
     @staticmethod
     def get_all_resumes(db: Session):
         return db.query(models.Resume).order_by(models.Resume.created_at.desc()).all()
@@ -101,19 +104,10 @@ class ResumeService:
     @staticmethod
     def update_resume(db: Session, resume_id: int, request: ResumeUpdateRequest):
         resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
-        if not resume:
-            return None
+        if not resume: return None
         
-        if request.file_name is not None:
-            resume.file_name = request.file_name
-        if request.parsed_skills is not None:
-            resume.parsed_skills = request.parsed_skills
-        if request.parsed_experience is not None:
-            resume.parsed_experience = request.parsed_experience
-        if request.parsed_education is not None:
-            resume.parsed_education = request.parsed_education
-        if request.dream_role is not None:
-            resume.dream_role = request.dream_role
+        for key, value in request.model_dump(exclude_unset=True).items():
+            setattr(resume, key, value)
             
         db.commit()
         db.refresh(resume)
@@ -127,12 +121,3 @@ class ResumeService:
             db.commit()
             return True
         return False
-
-    @staticmethod
-    def update_dream_role(db: Session, resume_id: int, dream_role: str):
-        resume = db.query(models.Resume).filter(models.Resume.id == resume_id).first()
-        if resume:
-            resume.dream_role = dream_role
-            db.commit()
-            db.refresh(resume)
-        return resume

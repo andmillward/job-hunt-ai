@@ -25,6 +25,15 @@ class JobCatcherProvider(BaseSearchProvider):
         remote_only = kwargs.get("remote_only", False)
         job_type = kwargs.get("job_type")
         
+        # Map internal job types to YC expected values (hyphenated)
+        jt_map = {
+            "full_time": "full-time",
+            "part_time": "part-time",
+            "contract": "contract",
+            "internship": "internship"
+        }
+        mapped_job_type = jt_map.get(job_type) if job_type else None
+        
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
@@ -34,7 +43,6 @@ class JobCatcherProvider(BaseSearchProvider):
                 page = context.new_page()
                 
                 # Navigate to YC Work at a Startup with levers
-                # https://www.workatastartup.com/jobs?query=kotlin&remote=true&job_type[]=full_time
                 encoded_query = urllib.parse.quote(keywords)
                 search_url = f"https://www.workatastartup.com/jobs?query={encoded_query}"
                 
@@ -44,9 +52,9 @@ class JobCatcherProvider(BaseSearchProvider):
                 if remote_only or (location and "remote" in location.lower()):
                     search_url += "&remote=true"
                 
-                if job_type:
+                if mapped_job_type:
                     # YC uses job_type[] array
-                    search_url += f"&job_type[]={job_type}"
+                    search_url += f"&job_type[]={mapped_job_type}"
                 
                 logger.info(f">>> PROVIDER: JobCatcher visiting {search_url}")
                 page.goto(search_url, wait_until="domcontentloaded")
@@ -56,7 +64,8 @@ class JobCatcherProvider(BaseSearchProvider):
 
                 # Wait for job cards or empty state
                 try:
-                    page.wait_for_selector("a[href*='/jobs/'], [class*='job-card'], [class*='JobCard'], .job-name", timeout=15000)
+                    # Look for links that contain /jobs/
+                    page.wait_for_selector("a[href*='/jobs/']", timeout=15000)
                 except:
                     content = page.content()
                     if "No jobs found" in content or "no results" in content.lower():
@@ -66,34 +75,44 @@ class JobCatcherProvider(BaseSearchProvider):
                     browser.close()
                     return []
                 
-                job_elements = page.query_selector_all("div[class*='job-card'], div[class*='JobCard'], .job-name")
-                if not job_elements:
-                    job_elements = page.query_selector_all("a[href*='/jobs/']")
+                # Broad selector for job containers
+                job_elements = page.query_selector_all("a[href*='/jobs/']")
                 
                 logger.info(f">>> PROVIDER: JobCatcher found {len(job_elements)} candidate elements")
                 
-                for el in job_elements[:limit]:
+                seen_urls = set()
+                for el in job_elements:
+                    if len(standardized_jobs) >= limit:
+                        break
+                        
                     try:
-                        title_el = el.query_selector(".job-name a, .job-title a")
-                        if not title_el:
-                            title_el = el if el.name == "a" else None
-                            
-                        title = title_el.inner_text() if title_el else "Unknown Title"
-                        url = title_el.get_attribute("href") if title_el else ""
+                        url = el.get_attribute("href")
+                        if not url or "/jobs/" not in url: continue
+                        
                         if url and not url.startswith("http"):
                             url = f"https://www.workatastartup.com{url}"
-                            
-                        company_el = el.query_selector(".company-name, .employer-name")
-                        company = company_el.inner_text() if company_el else "Unknown Company"
                         
-                        details_el = el.query_selector(".job-details, .description")
-                        details_text = details_el.inner_text() if details_el else ""
+                        if url in seen_urls: continue
+                        seen_urls.add(url)
+                            
+                        # Try to find title and company within or near the anchor
+                        # WorkAtAStartup often has the company name in a sibling or parent div
+                        parent = el.evaluate_handle("el => el.closest('div')") # Find nearest container
+                        
+                        # Very heuristic parsing for YC
+                        text = el.inner_text().strip()
+                        if not text: continue
+                        
+                        # Usually text is like "Software Engineer" or "Company Name \n Software Engineer"
+                        parts = text.split("\n")
+                        job_title = parts[-1].strip()
+                        company = parts[0].strip() if len(parts) > 1 else "YC Startup"
                         
                         standardized_jobs.append({
-                            "title": title,
+                            "title": job_title,
                             "company": company,
                             "location": "Remote / YC Network",
-                            "description": f"YC Startup Role: {details_text}",
+                            "description": f"YC Startup Role: {text}",
                             "job_url": url,
                             "site": "workatastartup",
                             "posted_at": datetime.now()
