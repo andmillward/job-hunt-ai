@@ -280,7 +280,7 @@ const WorkspaceView: React.FC<WorkspaceViewProps> = ({
             scanLimit={scanLimit}
             setScanLimit={setScanLimit}
             onRankJobs={onRankJobs}
-            onUpdateJobStatus={onUpdateJobStatus}
+            onUpdateStatus={onUpdateJobStatus}
             expandedJobs={expandedJobs}
             onToggleExpand={onToggleExpandJob}
           />
